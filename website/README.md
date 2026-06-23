@@ -1,41 +1,34 @@
-# Website
+# 📚 helm-gitlab documentation site
 
-This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
+The [Docusaurus](https://docusaurus.io/) site for **helm-gitlab**, published at
+https://bugs5382.github.io/helm-gitlab/.
 
-## Installation
+## 🧩 Prerequisites
 
-```bash
-yarn
-```
+- Node.js >= 20
+- npm
 
-## Local Development
-
-```bash
-yarn start
-```
-
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
-
-## Build
+## 💻 Local development
 
 ```bash
-yarn build
+npm install
+npm start
 ```
 
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
+Starts a local dev server with hot reload at http://localhost:3000.
 
-## Deployment
-
-Using SSH:
+## 🏗️ Build
 
 ```bash
-USE_SSH=true yarn deploy
+npm run build
 ```
 
-Not using SSH:
+Generates the static site into `build/`. Preview the production build with
+`npm run serve`.
 
-```bash
-GIT_USER=<Your GitHub username> yarn deploy
-```
+## 🚀 Deployment
 
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+Deployment is **automated** — do not deploy by hand. The `Docs Publish` GitHub
+Actions workflow (`.github/workflows/docs-publish.yaml`) builds the site and
+publishes it to GitHub Pages **on `vX.Y.Z` release tags only**, not on merges to
+`main`. Cutting a release tag is what ships the docs.
