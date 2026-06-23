@@ -1,0 +1,84 @@
+# Apache License 2.0
+#
+# Copyright 2026 Shane
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+apiVersion: v2
+name: helm-gitlab
+description: >-
+  Umbrella chart deploying GitLab on Kubernetes with everything in-cluster:
+  hand-rolled PostgreSQL 18 (1 primary + 1 standby, async streaming
+  replication, manual failover, pgBackRest backups to SeaweedFS S3), the
+  official Valkey chart, Traefik v3 on an isolated ingress class, and
+  SeaweedFS for S3-compatible object storage (replacing the bundled MinIO).
+  TLS is pluggable: bring your own cert-manager ClusterIssuer (off by default)
+  or supply secrets from an external source. Prometheus metrics surface across
+  every component; ServiceMonitor emission is per-environment so clusters
+  without prometheus-operator install cleanly. One-shot `helm install`, single
+  namespace.
+type: application
+version: 0.2.0
+appVersion: "17.0"
+kubeVersion: ">=1.28.0"
+icon: https://about.gitlab.com/images/press/logo/png/gitlab-icon-rgb.png
+
+keywords:
+  - gitlab
+  - postgresql
+  - pgbackrest
+  - valkey
+  - traefik
+  - acme
+  - cert-manager
+  - seaweedfs
+
+maintainers:
+  - name: Bugs5382
+    url: https://github.com/Bugs5382
+
+dependencies:
+  - name: gitlab
+    version: 9.11.6
+    repository: https://charts.gitlab.io
+    condition: gitlab.enabled
+
+  - name: traefik
+    version: 32.1.1
+    repository: https://traefik.github.io/charts
+    condition: traefik.enabled
+
+  # valkey is a vendored fork at charts/valkey/ with a helper rename
+  # patch (see charts/valkey/VENDOR.md). It is listed here with NO
+  # `repository:` field — helm 3+ resolves repo-less dependencies from
+  # the local `charts/` directory and `helm dependency update` is a
+  # no-op for them (no remote refresh to clobber the patch). Listing
+  # the dep is what `helm lint` needs; the un-repo'd form is what
+  # preserves the vendor.
+  - name: valkey
+    version: 0.9.4
+    condition: valkey.enabled
+
+  - name: seaweedfs
+    version: 4.34.0
+    repository: https://seaweedfs.github.io/seaweedfs/helm
+    condition: seaweedfs.enabled
+
+  # Second SeaweedFS instance, aliased, for the disposable runner cache.
+  # Same chart; `seaweedfsCache.nameOverride: seaweedfs-cache` keeps its
+  # resources from colliding with the durable instance. emptyDir-backed
+  # (see values.yaml seaweedfsCache block) so cache churn stays off Longhorn.
+  - name: seaweedfs
+    version: 4.34.0
+    repository: https://seaweedfs.github.io/seaweedfs/helm
+    alias: seaweedfsCache
+    condition: seaweedfsCache.enabled

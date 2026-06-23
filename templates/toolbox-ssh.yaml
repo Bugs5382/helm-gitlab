@@ -1,0 +1,95 @@
+{{- /*
+SSH access into the GitLab toolbox pod for admin rake / rails console / backup
+tasks. Bundles together everything that lives outside the toolbox subchart:
+
+  * ServiceAccount with `pods/exec` on the toolbox pod (so the sidecar can
+    `kubectl exec` admins into the actual toolbox container after they SSH in)
+  * Secret with the admin authorized_keys (from .Values.toolboxSsh.publicKey)
+  * Service targeting the toolbox pod, port 22 → container port 2222
+  * IngressRouteTCP routing Traefik's `toolboxssh` entrypoint (:2222 external,
+    defined in values-<env>.yaml) to that Service. SSH has no SNI, HostSNI(`*`)
+    matches.
+
+The sidecar container itself is injected into the toolbox pod via
+`gitlab.gitlab.toolbox.extraContainers` (in values.yaml).
+
+@todo(sfroebel, helm/gitlab): add a per-IP allowlist Traefik middleware on this
+IngressRouteTCP before broader rollout.
+*/ -}}
+{{- if .Values.toolboxSsh.enabled -}}
+{{- $key := include "helm-gitlab.required" (dict "value" .Values.toolboxSsh.publicKey "name" "toolboxSsh.publicKey") -}}
+{{- $user := .Values.toolboxSsh.username | default "admin" -}}
+{{- $sa := include "helm-gitlab.toolboxSsh.sa" . -}}
+{{- $svc := include "helm-gitlab.toolboxSsh.svc" . -}}
+{{- $secret := include "helm-gitlab.toolboxSsh.secret" . -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}-exec
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}-exec
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa }}-exec
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secret }}
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  authorized_keys: {{ $key | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: toolbox
+    release: {{ .Release.Name }}
+  ports:
+    - name: ssh
+      port: 2222
+      targetPort: 2222
+      protocol: TCP
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: {{ $svc }}
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.ingressClassName }}
+spec:
+  entryPoints:
+    - toolboxssh
+  routes:
+    - match: HostSNI(`*`)
+      services:
+        - name: {{ $svc }}
+          port: 2222
+{{- end -}}

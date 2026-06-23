@@ -24,3 +24,5 @@
 **/node_modules/**
 /docs/**
 /.superpowers/**
+/templates/**
+**/templates/**

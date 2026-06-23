@@ -1,0 +1,70 @@
+# Apache License 2.0
+#
+# Copyright 2026 Shane
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ci/helm-lint.yml
+#
+# Reusable Helm-chart lint job. Consumed via `include:` from the root
+# `.gitlab-ci.yml`. Will be relocated to a shared CI-templates repo
+# once that exists — the in-repo path is a transition stage.
+#
+# Naming follows CLAUDE.md §15 + memory/feedback-gitlab-ci-stage-naming.md:
+# both stages and jobs are quoted title case with spaces. Stage names live
+# in the root `.gitlab-ci.yml`; this file only references them.
+
+"Helm Lint":
+  stage: "Lint"
+  # alpine/helm uses the helm semver as its tag namespace; pinning the
+  # major version gets the latest 3.x. CI tooling is backward-compatible
+  # enough that a rolling-major tag is fine here.
+  image: alpine/helm:3
+  variables:
+    # Helm needs a writable cache + config dir inside the build pod.
+    HELM_CACHE_HOME: /tmp/.helm/cache
+    HELM_CONFIG_HOME: /tmp/.helm/config
+    HELM_DATA_HOME: /tmp/.helm/data
+  before_script:
+    - helm version --short
+    - helm repo add gitlab    https://charts.gitlab.io
+    - helm repo add traefik   https://traefik.github.io/charts
+    - helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+    - helm repo update
+    - helm dependency update .
+  script:
+    - helm lint .
+    # Lint every committed values-*.yaml overlay. New overlays land
+    # without a CI edit; WIP overlays kept as `*.yaml.draft` are
+    # intentionally skipped (the suffix is how we keep an unfinished
+    # overlay in-tree but un-applyable by `helm -f` tab-completion).
+    - |
+      for f in values-*.yaml; do
+        [ -e "$f" ] || { echo "no values-*.yaml at chart root"; exit 1; }
+        echo "==> helm lint . -f $f"
+        helm lint . -f "$f"
+      done
+    # PLACEHOLDER- markers exist in WIP overlays as fail-closed sentinels
+    # (see values-prod-ad.yaml.draft for the AD bring-up case). The
+    # markers are designed so an accidental apply fails at the bind
+    # layer rather than silently auto-promoting the wrong users — but
+    # that only holds if such an overlay never reaches a deploy step.
+    # This grep blocks merging a values-*.yaml that still carries them.
+    - |
+      if grep -nE 'PLACEHOLDER-' values-*.yaml; then
+        echo "ERROR: PLACEHOLDER- markers present in committed values files" >&2
+        echo "Replace placeholders or rename the file to *.yaml.draft" >&2
+        exit 1
+      fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

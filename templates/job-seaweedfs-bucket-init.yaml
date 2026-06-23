@@ -1,0 +1,69 @@
+{{- /*
+Create the buckets GitLab expects in SeaweedFS. Runs as a helm post-install
+& post-upgrade hook so it executes AFTER SeaweedFS is up. Idempotent —
+s3api create-bucket returns 200 or 409 BucketAlreadyOwnedByYou, both OK.
+
+Uses Amazon's official aws-cli image (public.ecr.aws/aws-cli/aws-cli) —
+small, non-Bitnami, trusted.
+*/ -}}
+{{- if .Values.objectStorage.bucketInit.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-seaweedfs-bucket-init
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {{- include "helm-gitlab.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bucket-init
+          image: {{ .Values.objectStorage.bucketInit.image | quote }}
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.seaweedfsAuth.secretName }}
+                  key: accessKey
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.seaweedfsAuth.secretName }}
+                  key: secretKey
+            - name: AWS_DEFAULT_REGION
+              value: local                 # ignored when --endpoint-url is set
+            - name: S3_ENDPOINT
+              value: {{ include "helm-gitlab.s3Endpoint" . }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # Wait for the SeaweedFS S3 endpoint to answer. The service
+              # comes up as soon as the s3 pod is Ready, but DNS might lag.
+              for i in $(seq 1 30); do
+                if aws --endpoint-url "$S3_ENDPOINT" s3 ls >/dev/null 2>&1; then
+                  echo "seaweedfs-s3 reachable"
+                  break
+                fi
+                echo "waiting for seaweedfs-s3 ($i/30)..."
+                sleep 5
+              done
+
+              for bucket in {{ range $key, $name := .Values.objectStorage.buckets }}{{ $name }} {{ end }}; do
+                echo "creating bucket: $bucket"
+                aws --endpoint-url "$S3_ENDPOINT" s3api create-bucket \
+                    --bucket "$bucket" 2>&1 | \
+                  grep -vE 'BucketAlreadyOwnedByYou|BucketAlreadyExists' || true
+              done
+
+              echo "buckets:"
+              aws --endpoint-url "$S3_ENDPOINT" s3 ls
+{{- end -}}

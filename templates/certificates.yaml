@@ -1,0 +1,74 @@
+{{- /*
+Per-Ingress TLS Certificates.
+
+One Certificate per public hostname, each in its own Secret. We own the
+Certificates explicitly here and point each Ingress at its own per-host
+Secret via values overrides:
+
+  gitlab.gitlab.webservice.ingress.tls.secretName  -> gitlab-tls
+  gitlab.registry.ingress.tls.secretName           -> gitlab-registry-tls
+  gitlab.gitlab.kas.ingress.tls.secretName         -> gitlab-kas-tls
+
+`issuerRef.kind: ClusterIssuer` — this chart does not install cert-manager.
+A cluster-wide cert-manager (installed separately) reconciles these
+Certificates against the ClusterIssuer named in `.Values.certManager.issuerName`.
+The TLS Secrets land in this release namespace.
+
+Regular templates, no hook. cert-manager CRDs must already exist on the cluster.
+
+Gated on `certManager.enabled` (default false). Set true when cert-manager
+is installed and you want the chart to issue certs automatically.
+*/ -}}
+{{- if .Values.certManager.enabled -}}
+{{- $issuer := .Values.certManager.issuerName | default "letsencrypt" -}}
+{{- $gitlabHost := include "helm-gitlab.host.gitlab" . -}}
+{{- $registryHost := include "helm-gitlab.host.registry" . -}}
+{{- $kasHost := include "helm-gitlab.host.kas" . -}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gitlab-tls
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+spec:
+  commonName: {{ $gitlabHost | quote }}
+  dnsNames:
+    - {{ $gitlabHost | quote }}
+  secretName: gitlab-tls
+  issuerRef:
+    name: {{ $issuer }}
+    kind: ClusterIssuer
+  privateKey:
+    rotationPolicy: Always
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gitlab-registry-tls
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+spec:
+  commonName: {{ $registryHost | quote }}
+  dnsNames:
+    - {{ $registryHost | quote }}
+  secretName: gitlab-registry-tls
+  issuerRef:
+    name: {{ $issuer }}
+    kind: ClusterIssuer
+  privateKey:
+    rotationPolicy: Always
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gitlab-kas-tls
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+spec:
+  commonName: {{ $kasHost | quote }}
+  dnsNames:
+    - {{ $kasHost | quote }}
+  secretName: gitlab-kas-tls
+  issuerRef:
+    name: {{ $issuer }}
+    kind: ClusterIssuer
+  privateKey:
+    rotationPolicy: Always
+{{- end -}}

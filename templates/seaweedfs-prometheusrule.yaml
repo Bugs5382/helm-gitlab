@@ -1,0 +1,73 @@
+{{- /*
+SeaweedFS capacity alerts.
+
+The .Values gate below short-circuits template execution when the
+seaweedfsAlerts feature is turned off — useful if a cluster doesn't
+have prometheus-operator (monitoring.coreos.com/v1 CRDs absent) or
+the operator isn't configured to load PrometheusRule from this
+namespace. On clusters where kube-prometheus-stack is installed
+with open rule discovery, so the default is on.
+
+The rules below target the failure mode observed 2026-05-18: the
+gitlab-registry collection ran out of writable volumes because each
+volume PVC (25Gi) was smaller than SeaweedFS's volume file size (30 GB
+default). Master logged "No writable volumes and no free volumes left"
+on every assign; registry returned UNKNOWN to clients. The PVC size
+was bumped to 50Gi as part of the same change that introduced this
+rule; these alerts catch a recurrence early (low disk → fire) rather
+than late (zero writable volumes → users hit 500s).
+
+Metric names follow the SeaweedFS exporter ("SeaweedFS_..." prefix).
+The master exposes them on the `metrics` port when the subchart's
+`master.metricsPort` (or equivalent) is enabled.
+*/}}
+{{- if .Values.seaweedfsAlerts.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-seaweedfs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helm-gitlab.labels" . | nindent 4 }}
+    {{- with .Values.seaweedfsAlerts.ruleSelectorLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: seaweedfs-capacity
+      interval: 1m
+      rules:
+        - alert: SeaweedFSNoWritableVolumes
+          expr: SeaweedFS_master_volumeLayout_writables == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: seaweedfs
+          annotations:
+            summary: "SeaweedFS collection {{ "{{" }} $labels.collection {{ "}}" }} has zero writable volumes"
+            description: |
+              The master reports {{ "{{" }} $labels.collection {{ "}}" }} has no
+              writable volumes. New writes (registry pushes, CI
+              artifacts, LFS) will return HTTP 500 from the filer and
+              the GitLab Container Registry surfaces this as a Go
+              time-parse error / UNKNOWN to clients. Likely cause:
+              every volume server's PVC is too full to allocate a fresh
+              volume. Resize the volume PVCs or run registry GC.
+        - alert: SeaweedFSVolumeServerDiskLow
+          expr: |
+            SeaweedFS_volumeServer_total_disk_size_bytes
+              - SeaweedFS_volumeServer_total_disk_used_size_bytes
+              < 35 * 1024 * 1024 * 1024
+          for: 10m
+          labels:
+            severity: warning
+            component: seaweedfs
+          annotations:
+            summary: "SeaweedFS volume server {{ "{{" }} $labels.instance {{ "}}" }} has <35 GiB free"
+            description: |
+              Volume server free disk is below one SeaweedFS volume
+              file (default 30 GB). When this drops to zero across all
+              volume servers, new volumes cannot be allocated for any
+              collection — see SeaweedFSNoWritableVolumes. Plan a PVC
+              expansion or registry GC before that threshold.
+{{- end }}

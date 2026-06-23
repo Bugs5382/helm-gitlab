@@ -1,0 +1,91 @@
+{{- /*
+Dedicated namespace for runner build pods.
+
+Why a separate namespace from the GitLab release namespace:
+  * BuildKit-rootless (and similar rootless build tools) require
+    `securityContext.seccompProfile.type: Unconfined` to be allowed
+    for the build container. PSA `baseline` (the level enforced on
+    the GitLab release namespace) does NOT allow Unconfined seccomp;
+    only PSA `privileged` does.
+  * Rather than weaken PSA on the GitLab data-plane namespace (which
+    would expose Postgres, Valkey, SeaweedFS, the registry, and
+    webservice pods to a more permissive policy), we isolate build
+    pods in a dedicated `gitlab-runner-build` namespace labeled PSA
+    `privileged`.
+
+Topology:
+  * Runner MANAGER pods stay in the GitLab release namespace (gitlab /
+    gitlab-dev). They mount the SealedSecret-materialized
+    `gitlab-runner-token` Secret. They talk to the K8s API to spawn
+    build pods.
+  * Build PODS land in `gitlab-runner-build`. They run with whatever
+    securityContext the .gitlab-ci.yml / runner config dictates,
+    constrained only by PSA `privileged` (i.e. nearly no restriction).
+
+The Role + RoleBinding below grant the GitLab-namespace's runner-manager
+ServiceAccount the same set of verbs in `gitlab-runner-build` that the
+subchart's own `rbac.create: true` Role grants in the GitLab namespace.
+Build-pod lifecycle, log/exec access, and per-job Secret/ConfigMap
+management all happen against this Role.
+
+Gated on `gitlab.gitlab-runner.install` so a dev cluster that disables
+runners doesn't render an unused namespace.
+*/ -}}
+{{- if (index .Values.gitlab "gitlab-runner" "install") -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.runner.jobNamespace | default "gitlab-runner-job" }}
+  labels:
+    {{- include "helm-gitlab.labels" . | nindent 4 }}
+    # PSA: build pods need `Unconfined` seccomp (and potentially other
+    # elevations for BuildKit-rootless and similar tools). The other PSA
+    # levels are also set to privileged so kubectl / API audit logs
+    # aren't filled with warnings for the legitimate build-pod configs.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/audit: privileged
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gitlab-runner-build-pods
+  namespace: {{ .Values.runner.jobNamespace | default "gitlab-runner-job" }}
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+rules:
+  # Same rule set as the runner subchart's own gitlab-namespace Role
+  # (see `gitlab.gitlab-runner.rbac.rules` in values.yaml). Kept in
+  # sync deliberately — both Roles target the same executor behavior;
+  # one applies to the manager namespace (gitlab), this one to the
+  # build namespace.
+  - apiGroups: [""]
+    resources: ["pods","pods/log","configmaps","services"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec","pods/attach"]
+    verbs: ["get","create","patch","delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitlab-runner-build-pods
+  namespace: {{ .Values.runner.jobNamespace | default "gitlab-runner-job" }}
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    # The runner-manager subchart creates this SA in the GitLab release
+    # namespace (when serviceAccount.create=true). RoleBinding cross-
+    # references it by namespace.
+    name: {{ .Release.Name }}-gitlab-runner
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gitlab-runner-build-pods
+{{- end -}}

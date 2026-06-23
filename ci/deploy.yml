@@ -1,0 +1,53 @@
+# Apache License 2.0
+#
+# Copyright 2026 Shane
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ci/deploy.yml
+#
+# Example deploy stage. Customize release name, namespace, and values file
+# for your environment.
+#
+# Required CI variables:
+#   KUBECONFIG_DATA — masked env_var holding the base64-encoded cluster
+#                     admin kubeconfig (masked vars can't carry multi-line
+#                     YAML, hence base64; decoded into $KUBECONFIG below).
+#
+# The deploy job applies the chart using `--reset-then-reuse-values` so
+# secrets preserved across upgrades; only your values overlay is layered on top.
+
+"Deploy":
+  stage: "Deploy"
+  image: alpine/helm:3
+  variables:
+    HELM_CACHE_HOME: /tmp/.helm/cache
+    HELM_CONFIG_HOME: /tmp/.helm/config
+    HELM_DATA_HOME: /tmp/.helm/data
+    KUBECONFIG: /tmp/kubeconfig
+  before_script:
+    - helm version --short
+    - helm repo add gitlab    https://charts.gitlab.io
+    - helm repo add traefik   https://traefik.github.io/charts
+    - helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+    - helm repo update
+    - helm dependency update .
+    - echo "$KUBECONFIG_DATA" | base64 -d > "$KUBECONFIG" && chmod 600 "$KUBECONFIG"
+  script:
+    - |
+      helm upgrade --install gitlab . \
+        -n gitlab \
+        --reset-then-reuse-values \
+        -f values.example.yaml \
+        --wait --timeout 15m
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
