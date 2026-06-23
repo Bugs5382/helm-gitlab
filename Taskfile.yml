@@ -18,7 +18,7 @@
 # `task license:fix` injects the header into any file missing it.
 version: '3'
 vars:
-  GOLIC_VERSION: v0.2.0
+  GOLIC_VERSION: v0.3.0
   TEMPLATE_LIC: "apache2"
   COMMON_LIC: "2026 Shane"
 tasks:
