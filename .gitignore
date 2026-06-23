@@ -7,3 +7,6 @@ website/node_modules/
 website/build/
 website/.docusaurus/
 node_modules/
+
+# vendored chart deps — run `helm dependency build` (pinned by Chart.lock)
+charts/*.tgz
