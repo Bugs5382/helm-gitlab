@@ -18,8 +18,8 @@ name: helm-gitlab
 description: >-
   Umbrella chart deploying GitLab on Kubernetes with everything in-cluster:
   hand-rolled PostgreSQL 18 (1 primary + 1 standby, async streaming
-  replication, manual failover, pgBackRest backups to SeaweedFS S3), the
-  official Valkey chart, Traefik v3 on an isolated ingress class, and
+  replication, manual failover), the official Valkey chart, Traefik v3 on
+  an isolated ingress class, and
   SeaweedFS for S3-compatible object storage (replacing the bundled MinIO).
   TLS is pluggable: bring your own cert-manager ClusterIssuer (off by default)
   or supply secrets from an external source. Prometheus metrics surface across
@@ -35,7 +35,6 @@ icon: https://about.gitlab.com/images/press/logo/png/gitlab-icon-rgb.png
 keywords:
   - gitlab
   - postgresql
-  - pgbackrest
   - valkey
   - traefik
   - acme

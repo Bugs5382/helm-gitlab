@@ -92,21 +92,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.postgres.secretName }}
                   key: superuser-password
-            {{- if .Values.postgres.backup.enabled }}
-            # pgBackRest reads PGBACKREST_REPO1_S3_KEY / _KEY_SECRET for
-            # S3 auth (not AWS_*). Set explicitly so the archive_command,
-            # which runs in this container on every WAL switch, can push.
-            - name: PGBACKREST_REPO1_S3_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.seaweedfsAuth.secretName }}
-                  key: accessKey
-            - name: PGBACKREST_REPO1_S3_KEY_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.seaweedfsAuth.secretName }}
-                  key: secretKey
-            {{- end }}
           ports:
             - name: postgres
               containerPort: 5432

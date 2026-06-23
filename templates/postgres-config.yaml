@@ -1,20 +1,16 @@
 {{- if .Values.postgres.enabled -}}
 {{- /*
 ConfigMap mounted on both primary and standby pods at /etc/postgres.
-Holds the three config files Postgres + pgBackRest read:
+Holds the two config files Postgres reads:
 
   postgresql.conf  — server config, sourced via `-c config_file=...`.
                      Enables streaming replication (wal_level=replica,
-                     hot_standby=on, archive_*). Same on primary and
-                     standby — primary ignores hot_standby (recovery-only),
-                     standby ignores archive_command (read-only).
+                     hot_standby=on). Same on primary and standby — the
+                     primary ignores hot_standby (recovery-only).
   pg_hba.conf      — auth rules. Allows app + replication from the
                      cluster pod CIDR (10.0.0.0/8 covers any RFC1918
                      /8-rooted kube pod range, including this cluster's
                      10.244.0.0/16 Cilium-allocated /24-per-node ranges).
-  pgbackrest.conf  — backup repo config (SeaweedFS S3). Read by both
-                     the WAL archive_command on the primary and the
-                     daily backup CronJob.
 */ -}}
 apiVersion: v1
 kind: ConfigMap
@@ -41,16 +37,6 @@ data:
     logging_collector = off
     log_min_messages = warning
     log_line_prefix = '%t [%p] %q%u@%d '
-    {{- if .Values.postgres.backup.enabled }}
-    # WAL archiving to pgBackRest (SeaweedFS S3). Configured explicitly
-    # with --config since pgBackRest's default path (/etc/pgbackrest.conf)
-    # is not where the chart mounts it.
-    archive_mode = on
-    archive_command = 'pgbackrest --config=/etc/postgres/pgbackrest.conf --stanza=gitlab archive-push %p'
-    # Force a WAL switch every 5 minutes so a quiet DB still ships
-    # something to the archive (RPO worst case = 5 min on idle).
-    archive_timeout = 300
-    {{- end }}
   pg_hba.conf: |
     # Local socket: trust (only root/postgres in the container have access).
     local   all             all                                     trust
@@ -63,35 +49,6 @@ data:
     host    all             {{ .Values.postgres.superUser }}             10.0.0.0/8     scram-sha-256
     # Replication from the standby (replicator role).
     host    replication     {{ .Values.postgres.replicationUser }}     10.0.0.0/8     scram-sha-256
-  pgbackrest.conf: |
-    [global]
-    repo1-type=s3
-    # pgBackRest 2.58 supports S3 only over HTTPS. SeaweedFS S3 itself
-    # serves plain HTTP; templates/postgres-s3-proxy.yaml stands up an
-    # nginx Deployment that terminates HTTPS on 8443 and forwards to
-    # seaweedfs-s3:8333. The self-signed cert is lookup-preserve so it
-    # is stable across upgrades; pgBackRest skips verification via
-    # repo1-storage-verify-tls=n.
-    repo1-s3-endpoint=postgres-s3-proxy
-    repo1-s3-bucket={{ .Values.postgres.backup.s3.bucket }}
-    repo1-s3-region=local
-    repo1-s3-uri-style=path
-    repo1-s3-port=8443
-    repo1-storage-verify-tls=n
-    repo1-path=/pgbackrest
-    repo1-retention-full={{ .Values.postgres.backup.retentionFull }}
-    start-fast=y
-    # Process per-segment in parallel — small DB, low cost; keeps WAL
-    # archive_command fast enough that archive_timeout (5 min) is
-    # comfortable.
-    process-max=2
-    log-level-console=info
-    log-level-file=off
-
-    [gitlab]
-    pg1-path=/var/lib/postgresql/data/pgdata
-    pg1-user={{ .Values.postgres.superUser }}
-    pg1-database=postgres
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -108,9 +65,9 @@ data:
   # primary StatefulSet from the postgres credentials Secret.
   #
   # The postgres image initializes ONLY $POSTGRES_USER (gitlab) as the
-  # superuser. pgBackRest's stanza-create and our backup CronJob both
-  # expect a separate `postgres` superuser alongside the app role; this
-  # block creates it.
+  # superuser. A separate `postgres` superuser is needed for admin /
+  # toolbox runbook use (see the superuser pg_hba rule above); this
+  # block creates it alongside the app role.
   00-roles-extensions.sh: |
     #!/bin/bash
     set -euo pipefail
