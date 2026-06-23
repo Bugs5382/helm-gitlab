@@ -1,0 +1,178 @@
+{{- if and .Values.postgres.enabled .Values.postgres.backup.enabled -}}
+{{- /*
+TLS-terminating proxy in front of seaweedfs-s3.
+
+WHY: pgBackRest (2.58) supports S3 only over HTTPS — there is no
+HTTP option for the S3 repo type. SeaweedFS S3 (the in-cluster
+endpoint shared with GitLab artifacts, registry, runner cache,
+etc.) serves plain HTTP on :8333. Enabling TLS on seaweedfs-s3
+itself would force a coordinated migration of every existing
+consumer; this proxy lets only pgBackRest move first.
+
+The proxy is a small nginx Deployment + Service. Cert is self-signed
+and generated at chart install time via Helm's `genCA` / `genSignedCert`;
+pgBackRest connects with `repo1-storage-verify-tls=n`, so verification
+isn't exercised — the cert is just what TLS hand-shake requires.
+
+Lookup-preserve so the cert is stable across upgrades (otherwise
+every helm upgrade would rotate it and the nginx pod would restart).
+*/ -}}
+{{- $secretName := "postgres-s3-proxy-tls" -}}
+{{- $existing := (lookup "v1" "Secret" .Release.Namespace $secretName) -}}
+{{- $cert := "" -}}
+{{- $key := "" -}}
+{{- if and $existing (hasKey $existing.data "tls.crt") -}}
+{{- $cert = index $existing.data "tls.crt" | b64dec -}}
+{{- $key = index $existing.data "tls.key" | b64dec -}}
+{{- else -}}
+{{- $ca := genCA "postgres-s3-proxy-ca" 3650 -}}
+{{- $altNames := list "postgres-s3-proxy" (printf "postgres-s3-proxy.%s" .Release.Namespace) (printf "postgres-s3-proxy.%s.svc" .Release.Namespace) -}}
+{{- $signed := genSignedCert "postgres-s3-proxy" nil $altNames 3650 $ca -}}
+{{- $cert = $signed.Cert -}}
+{{- $key = $signed.Key -}}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  labels:
+    {{- include "helm-gitlab.labels" . | nindent 4 }}
+    app: postgres-s3-proxy
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $cert | b64enc }}
+  tls.key: {{ $key | b64enc }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-s3-proxy-config
+  labels:
+    {{- include "helm-gitlab.labels" . | nindent 4 }}
+    app: postgres-s3-proxy
+data:
+  nginx.conf: |
+    worker_processes 1;
+    error_log /dev/stderr warn;
+    pid /tmp/nginx.pid;
+    events { worker_connections 256; }
+    http {
+      access_log off;
+      proxy_request_buffering off;
+      proxy_buffering off;
+      client_body_temp_path /tmp/client_body;
+      proxy_temp_path /tmp/proxy;
+      fastcgi_temp_path /tmp/fastcgi;
+      uwsgi_temp_path /tmp/uwsgi;
+      scgi_temp_path /tmp/scgi;
+      # S3 PUT body sizes can be large (default base backup chunk
+      # 16 MiB; uploads can exceed that with multipart). 0 = no cap.
+      client_max_body_size 0;
+      server {
+        listen 8443 ssl;
+        ssl_certificate     /etc/proxy-tls/tls.crt;
+        ssl_certificate_key /etc/proxy-tls/tls.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        location / {
+          proxy_pass http://seaweedfs-s3:8333;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_http_version 1.1;
+          proxy_read_timeout 600s;
+          proxy_send_timeout 600s;
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-s3-proxy
+  labels:
+    {{- include "helm-gitlab.labels" . | nindent 4 }}
+    app: postgres-s3-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres-s3-proxy
+  ports:
+    - name: https
+      port: 8443
+      targetPort: 8443
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-s3-proxy
+  labels:
+    {{- include "helm-gitlab.labels" . | nindent 4 }}
+    app: postgres-s3-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-s3-proxy
+  template:
+    metadata:
+      labels:
+        {{- include "helm-gitlab.labels" . | nindent 8 }}
+        app: postgres-s3-proxy
+    spec:
+      securityContext:
+        runAsUser: 101                # nginx user in nginxinc image
+        runAsGroup: 101
+        runAsNonRoot: true
+        fsGroup: 101
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:1.27-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: tls
+              mountPath: /etc/proxy-tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/nginx
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8443
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8443
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: postgres-s3-proxy-config
+            defaultMode: 0644
+        - name: tls
+          secret:
+            secretName: {{ $secretName }}
+            defaultMode: 0440
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+{{- end -}}

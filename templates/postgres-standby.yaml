@@ -1,0 +1,210 @@
+{{- if .Values.postgres.enabled -}}
+{{- /*
+Standby StatefulSet (postgres.standby.replicas pods) + read-only ClusterIP Service.
+
+The standby bootstraps via pg_basebackup from postgres-primary in an
+initContainer (idempotent — skipped when PGDATA is already populated),
+then the postgres process follows the primary via streaming replication
+configured in postgresql.auto.conf.
+
+primary_conninfo is written explicitly (rather than via pg_basebackup
+-R) so we can embed the replicator password — libpq reads passwords
+from PGPASSWORD only for client tools, not for the walreceiver itself,
+so the password has to live in the conninfo string. postgresql.auto.conf
+is created with mode 0600 by basebackup, owned by postgres, so the
+password is no more exposed than the rest of PGDATA.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-standby
+  labels:
+    {{- include "helm-gitlab.labels" . | nindent 4 }}
+    app: postgres
+    role: standby
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+    role: standby
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-standby
+  labels:
+    {{- include "helm-gitlab.labels" . | nindent 4 }}
+    app: postgres
+    role: standby
+spec:
+  serviceName: postgres-standby
+  replicas: {{ .Values.postgres.standby.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: postgres
+      role: standby
+  template:
+    metadata:
+      labels:
+        {{- include "helm-gitlab.labels" . | nindent 8 }}
+        app: postgres
+        role: standby
+    spec:
+      # Spread the primary + every standby onto distinct nodes so a single
+      # host failure drops at most one copy. Selects all `app: postgres` pods
+      # (primary + standbys) by hostname. `hard` (required) guarantees distinct
+      # hosts — a standby with no free host stays Pending; `soft` (preferred)
+      # is best-effort and never blocks scheduling. See postgres.antiAffinity.
+      affinity:
+        podAntiAffinity:
+          {{- if eq .Values.postgres.antiAffinity "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: postgres
+              topologyKey: kubernetes.io/hostname
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: postgres
+                topologyKey: kubernetes.io/hostname
+          {{- end }}
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+        fsGroup: 999
+      initContainers:
+        - name: basebackup
+          image: {{ include "helm-gitlab.postgres.image" . | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: replication-password
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              PGDATA=/var/lib/postgresql/data/pgdata
+              if [ -s "$PGDATA/PG_VERSION" ]; then
+                echo "PGDATA already initialized at $PGDATA, skipping basebackup."
+                exit 0
+              fi
+              # Wait for the primary to be reachable. pg_isready returns 0
+              # even on auth failure (it's a TCP/protocol probe), which is
+              # what we want — auth is exercised by basebackup itself.
+              echo "waiting for postgres-primary to be reachable..."
+              until pg_isready -h postgres-primary -p 5432 -U {{ .Values.postgres.replicationUser }} -t 5; do
+                sleep 3
+              done
+              mkdir -p "$PGDATA"
+              rm -rf "$PGDATA"/* "$PGDATA"/.[!.]* 2>/dev/null || true
+              # -Fp plain (vs tar) so PGDATA is directly usable.
+              # -Xf fetch the required WAL in a single pass at the end of the
+              # backup, instead of -Xs (a concurrent WAL stream). -Xs opens a
+              # second walsender connection that the primary's
+              # wal_sender_timeout (default 60s) terminates whenever the
+              # clone's WAL receiver stalls on I/O, which aborts the whole
+              # basebackup — this repeatedly blocked the standby-1 rebuild
+              # (2026-06-12). -Xf has no concurrent stream to time out; it
+              # relies on wal_keep_size (512MB on the primary) still holding
+              # the WAL generated during the backup, which the measured
+              # ~3.5 MB/min WAL rate keeps comfortably within margin.
+              # -P show progress in container logs.
+              # -c fast issue an immediate checkpoint on the primary
+              # rather than waiting for the next periodic one.
+              pg_basebackup -h postgres-primary -p 5432 -U {{ .Values.postgres.replicationUser }} \
+                -D "$PGDATA" -Fp -Xf -P -c fast
+              chmod 0700 "$PGDATA"
+              # Mark as standby + configure streaming. PGPASSWORD is embedded
+              # in primary_conninfo because the walreceiver does not consult
+              # env vars; postgresql.auto.conf is 0600 root-of-PGDATA, so
+              # exposure is no broader than the data files themselves.
+              touch "$PGDATA/standby.signal"
+              cat >> "$PGDATA/postgresql.auto.conf" <<EOF
+              primary_conninfo = 'host=postgres-primary port=5432 user={{ .Values.postgres.replicationUser }} password=${PGPASSWORD} application_name=${HOSTNAME}'
+              EOF
+              echo "basebackup complete; PGDATA ready as standby."
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      containers:
+        - name: postgres
+          image: {{ include "helm-gitlab.postgres.image" . | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          args:
+            - -c
+            - config_file=/etc/postgres/postgresql.conf
+            - -c
+            - hba_file=/etc/postgres/pg_hba.conf
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: config
+              mountPath: /etc/postgres
+            - name: dshm
+              mountPath: /dev/shm
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.postgres.appUser }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.postgres.appUser }}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: config
+          configMap:
+            name: postgres-config
+            defaultMode: 0644
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "helm-gitlab.labels" . | nindent 10 }}
+          app: postgres
+          role: standby
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ include "helm-gitlab.postgres.storageClass" . | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage.size | quote }}
+{{- end -}}

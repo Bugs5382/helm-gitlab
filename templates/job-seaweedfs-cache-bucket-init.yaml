@@ -1,0 +1,66 @@
+{{- /*
+Create the gitlab-runner-cache bucket on the disposable cache SeaweedFS.
+Same pattern as job-seaweedfs-bucket-init.yaml but points at the cache S3
+endpoint + cache creds and creates only the runner-cache bucket. Because the
+cache instance is emptyDir-backed, the bucket vanishes whenever the volume
+pod restarts, so this runs on every install/upgrade (post hooks) to recreate
+it. Idempotent — create-bucket returns 200 or 409, both fine.
+*/ -}}
+{{- if and .Values.seaweedfsCache.enabled .Values.objectStorage.bucketInit.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-seaweedfs-cache-bucket-init
+  labels: {{- include "helm-gitlab.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {{- include "helm-gitlab.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bucket-init
+          image: {{ .Values.objectStorage.bucketInit.image | quote }}
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.seaweedfsCacheAuth.secretName }}
+                  key: accessKey
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.seaweedfsCacheAuth.secretName }}
+                  key: secretKey
+            - name: AWS_DEFAULT_REGION
+              value: local                 # ignored when --endpoint-url is set
+            - name: S3_ENDPOINT
+              value: {{ include "helm-gitlab.cacheS3Endpoint" . }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              for i in $(seq 1 30); do
+                if aws --endpoint-url "$S3_ENDPOINT" s3 ls >/dev/null 2>&1; then
+                  echo "seaweedfs-cache-s3 reachable"
+                  break
+                fi
+                echo "waiting for seaweedfs-cache-s3 ($i/30)..."
+                sleep 5
+              done
+
+              bucket="{{ .Values.objectStorage.buckets.runnerCache | default "gitlab-runner-cache" }}"
+              echo "creating bucket: $bucket"
+              aws --endpoint-url "$S3_ENDPOINT" s3api create-bucket \
+                  --bucket "$bucket" 2>&1 | \
+                grep -vE 'BucketAlreadyOwnedByYou|BucketAlreadyExists' || true
+
+              echo "buckets:"
+              aws --endpoint-url "$S3_ENDPOINT" s3 ls
+{{- end -}}

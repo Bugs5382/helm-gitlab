@@ -1,0 +1,59 @@
+helm-gitlab installed in namespace: {{ .Release.Namespace }}
+
+== URLs ==
+  GitLab:   https://{{ include "helm-gitlab.host.gitlab" . }}
+  Registry: https://{{ include "helm-gitlab.host.registry" . }}
+  KAS:      https://{{ include "helm-gitlab.host.kas" . }}
+  SSH:      ssh git@{{ include "helm-gitlab.host.ssh" . }}
+
+== Initial root password ==
+  kubectl -n {{ .Release.Namespace }} get secret gitlab-gitlab-initial-root-password \
+    -o jsonpath='{.data.password}' | base64 -d ; echo
+
+== Traefik LoadBalancer IP ==
+  kubectl -n {{ .Release.Namespace }} get svc {{ .Release.Name }}-traefik
+  Point your DNS A records for the hostnames above at this IP.
+
+== PostgreSQL (hand-rolled primary + standby) ==
+  kubectl -n {{ .Release.Namespace }} get pods -l app=postgres
+  Read-write:  postgres-primary:5432
+  Read-only:   postgres-standby:5432
+  Credentials: kubectl -n {{ .Release.Namespace }} get secret {{ .Values.postgres.secretName }}
+
+== SeaweedFS S3 ==
+  Endpoint: {{ include "helm-gitlab.s3Endpoint" . }}
+  Creds:    kubectl -n {{ .Release.Namespace }} get secret {{ .Values.seaweedfsAuth.secretName }}
+  Buckets:  kubectl -n {{ .Release.Namespace }} logs job/{{ .Release.Name }}-seaweedfs-bucket-init
+
+== Valkey ==
+  kubectl -n {{ .Release.Namespace }} get svc | grep valkey
+  Password: kubectl -n {{ .Release.Namespace }} get secret {{ .Values.valkeyAuth.secretName }} \
+    -o jsonpath='{.data.password}' | base64 -d ; echo
+
+== TLS ==
+{{- if .Values.certManager.enabled }}
+  cert-manager Certificates rendered — check issuance:
+    kubectl -n {{ .Release.Namespace }} get certificate
+{{- else }}
+  certManager.enabled is false. Supply TLS Secrets manually or enable cert-manager:
+    kubectl -n {{ .Release.Namespace }} create secret tls gitlab-tls \
+      --cert=tls.crt --key=tls.key
+{{- end }}
+
+== Prometheus metrics ==
+  kubectl -n {{ .Release.Namespace }} get servicemonitor
+  kubectl -n {{ .Release.Namespace }} get podmonitor
+
+== REQUIRED values reminder ==
+  image.registry     = {{ .Values.image.registry | quote }}
+  hostnames.gitlab   = {{ .Values.hostnames.gitlab | quote }}
+  hostnames.registry = {{ .Values.hostnames.registry | quote }}
+  hostnames.kas      = {{ .Values.hostnames.kas | quote }}
+  hostnames.ssh      = {{ .Values.hostnames.ssh | quote }}
+  storageClass       = {{ .Values.storageClass | quote }}
+  ingressClassName   = {{ .Values.ingressClassName | quote }}
+
+  If you installed into a namespace other than `gitlab`, set:
+    traefik.providers.kubernetesIngress.namespaces[0]
+    traefik.providers.kubernetesCRD.namespaces[0]
+  to match your release namespace.

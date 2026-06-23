@@ -1,0 +1,106 @@
+# Apache License 2.0
+#
+# Copyright 2026 Shane
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# values.example.yaml — fill in the REQUIRED values and remove this comment.
+# Copy this file to a local values file and customize for your environment.
+#
+# Deploy:
+#   helm upgrade --install gitlab . -n gitlab --create-namespace \
+#     -f values.example.yaml
+
+# ============================================================================
+# REQUIRED
+# ============================================================================
+image:
+  registry: docker.io              # replace with your registry
+
+hostnames:
+  gitlab:   gitlab.example.com
+  registry: registry.example.com
+  kas:      kas.example.com
+  ssh:      gitlab.example.com     # may be the same as gitlab
+
+storageClass:   standard           # your RWO StorageClass
+ingressClassName: gitlab           # your IngressClass name
+
+# ============================================================================
+# TLS — provide pre-existing Secrets OR enable cert-manager below
+# ============================================================================
+# To bring your own TLS secrets:
+#   kubectl -n gitlab create secret tls gitlab-tls      --cert=tls.crt --key=tls.key
+#   kubectl -n gitlab create secret tls gitlab-registry-tls --cert=tls.crt --key=tls.key
+#   kubectl -n gitlab create secret tls gitlab-kas-tls  --cert=tls.crt --key=tls.key
+#
+# To use cert-manager (requires a ClusterIssuer already installed):
+# certManager:
+#   enabled: true
+#   issuerName: letsencrypt        # your ClusterIssuer name
+
+# ============================================================================
+# SSH access key for the toolbox admin (required when toolboxSsh.enabled=true)
+# ============================================================================
+toolboxSsh:
+  publicKey: "ssh-ed25519 AAAA... admin@example.com"
+
+# ============================================================================
+# SMTP (optional — leave smtp.enabled: false to skip outbound mail)
+# ============================================================================
+# gitlab:
+#   global:
+#     smtp:
+#       enabled: true
+#       address: smtp.example.com
+#       port: 587
+#       domain: example.com
+#     email:
+#       from: gitlab@example.com
+#       reply_to: gitlab@example.com
+
+# ============================================================================
+# GitLab runner URL — must match hostnames.gitlab
+# ============================================================================
+gitlab:
+  global:
+    hosts:
+      domain:   example.com
+      ssh:      gitlab.example.com
+      gitlab:
+        name:   gitlab.example.com
+      registry:
+        name:   registry.example.com
+    ingress:
+      class:    gitlab             # must match ingressClassName above
+    psql:
+      password:
+        secret: gitlab-postgres-app
+    storageClass: standard         # must match storageClass above
+
+  gitlab-runner:
+    gitlabUrl: https://gitlab.example.com/
+
+# Traefik IngressClass and namespace providers — must match ingressClassName
+# and the release namespace.
+traefik:
+  ingressClass:
+    name: gitlab
+  providers:
+    kubernetesIngress:
+      ingressClass: gitlab
+      namespaces:
+        - gitlab
+    kubernetesCRD:
+      ingressClass: gitlab
+      namespaces:
+        - gitlab

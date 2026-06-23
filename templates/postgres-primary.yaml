@@ -1,0 +1,186 @@
+{{- if .Values.postgres.enabled -}}
+{{- /*
+Primary StatefulSet (1 replica) + ClusterIP Service.
+
+The Service `postgres-primary` is what GitLab's global.psql.host points at.
+StatefulSet.serviceName references it for the pod-DNS namespace (we don't
+rely on per-pod DNS since there's only one primary replica, so a regular
+ClusterIP Service rather than a headless one is sufficient and gives the
+RW endpoint stable in-cluster DNS even during a pod restart).
+
+Image: the derived postgres:18+pgBackRest from Harbor (.Values.postgres.image).
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-primary
+  labels:
+    {{- include "helm-gitlab.labels" . | nindent 4 }}
+    app: postgres
+    role: primary
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+    role: primary
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-primary
+  labels:
+    {{- include "helm-gitlab.labels" . | nindent 4 }}
+    app: postgres
+    role: primary
+spec:
+  serviceName: postgres-primary
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+      role: primary
+  template:
+    metadata:
+      labels:
+        {{- include "helm-gitlab.labels" . | nindent 8 }}
+        app: postgres
+        role: primary
+    spec:
+      securityContext:
+        # Image runs as uid 999 (postgres). fsGroup ensures the
+        # mounted PVC is recursively chowned to gid 999 on first
+        # boot so the postgres process can write to PGDATA.
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: {{ include "helm-gitlab.postgres.image" . | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.appUser | quote }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: password
+            - name: POSTGRES_INITDB_ARGS
+              value: "--auth-host=scram-sha-256"
+            # Consumed by /docker-entrypoint-initdb.d/00-roles-extensions.sh
+            # on first boot to set role passwords (replicator + a
+            # dedicated `postgres` superuser, which the upstream postgres
+            # image doesn't create when POSTGRES_USER is set to anything
+            # other than `postgres`).
+            - name: REPL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: replication-password
+            - name: SUPER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: superuser-password
+            {{- if .Values.postgres.backup.enabled }}
+            # pgBackRest reads PGBACKREST_REPO1_S3_KEY / _KEY_SECRET for
+            # S3 auth (not AWS_*). Set explicitly so the archive_command,
+            # which runs in this container on every WAL switch, can push.
+            - name: PGBACKREST_REPO1_S3_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.seaweedfsAuth.secretName }}
+                  key: accessKey
+            - name: PGBACKREST_REPO1_S3_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.seaweedfsAuth.secretName }}
+                  key: secretKey
+            {{- end }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          args:
+            - -c
+            - config_file=/etc/postgres/postgresql.conf
+            - -c
+            - hba_file=/etc/postgres/pg_hba.conf
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: config
+              mountPath: /etc/postgres
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+            # /dev/shm sized to fit shared_buffers + a working margin.
+            # Container runtime default is 64Mi which is too small once
+            # shared_buffers >= 128Mi (postgres falls back to
+            # mmap-on-disk with significant performance loss; on heavier
+            # workloads it errors out with "could not resize shared
+            # memory segment").
+            - name: dshm
+              mountPath: /dev/shm
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.postgres.appUser }}
+                - -d
+                - {{ .Values.postgres.database }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.postgres.appUser }}
+                - -d
+                - {{ .Values.postgres.database }}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: config
+          configMap:
+            name: postgres-config
+            defaultMode: 0644
+        - name: initdb
+          configMap:
+            name: postgres-initdb
+            defaultMode: 0755
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "helm-gitlab.labels" . | nindent 10 }}
+          app: postgres
+          role: primary
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ include "helm-gitlab.postgres.storageClass" . | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage.size | quote }}
+{{- end -}}

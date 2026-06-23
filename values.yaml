@@ -1,0 +1,1352 @@
+# Apache License 2.0
+#
+# Copyright 2026 Shane
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# helm-gitlab values — base defaults.
+#
+# Quick start:
+#
+#     helm repo add gitlab   https://charts.gitlab.io
+#     helm repo add traefik  https://traefik.github.io/charts
+#     helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+#     helm repo update
+#     helm dependency build .
+#
+#     helm upgrade --install gitlab . -n gitlab --create-namespace \
+#       -f values.example.yaml
+#
+# This file holds env-agnostic defaults. Per-environment overrides should be
+# placed in a separate values file. Valkey password, SeaweedFS S3 creds, and
+# PG app-user password are auto-generated and preserved across upgrades via
+# resource-policy:keep / `helm lookup`.
+
+# ============================================================================
+# REQUIRED — set these or the chart refuses to render. Sensible defaults exist
+# for everything else.
+# ============================================================================
+image:
+  registry: ""            # REQUIRED  e.g. docker.io or registry.example.com
+
+hostnames:
+  gitlab: ""              # REQUIRED  gitlab.example.com
+  registry: ""            # REQUIRED  registry.example.com
+  kas: ""                 # REQUIRED  kas.example.com
+  ssh: ""                 # REQUIRED  gitlab-ssh.example.com (or same as gitlab)
+
+storageClass: ""          # REQUIRED  a RWO StorageClass name
+ingressClassName: ""      # REQUIRED  your ingress class name
+clusterDomain: cluster.local
+
+runner:
+  # Namespace where CI build pods land. Must exist; this chart creates it when
+  # gitlab-runner is installed. Set jobNamespace to isolate build pods under
+  # PSA privileged without weakening the GitLab release namespace.
+  jobNamespace: gitlab-runner-job
+
+# =============================================================================
+# Top-level inputs
+# =============================================================================
+
+# Helm top-level `global:` — propagated to every subchart's `.Values.global`
+# automatically by Helm. Used here so the runner cache's TOML config (which
+# is `tpl`-processed by the gitlab-runner subchart's configmap template) can
+# reference the cluster's CoreDNS suffix without each env-specific values
+# file having to repeat the literal FQDN.
+#
+# Verify a cluster's actual suffix with:
+#   kubectl -n kube-system get cm coredns \
+#     -o jsonpath='{.data.Corefile}' | grep 'kubernetes '
+#
+# The Kubernetes-default `cluster.local` is used. Override via `clusterDomain`
+# at the top of this file if your cluster uses a non-standard suffix.
+global:
+  dnsDomain: cluster.local
+
+# toolboxSsh — SSH sidecar in the GitLab toolbox pod so admins can run
+# rake / rails console / backup commands remotely. The chart wires up:
+#   * ServiceAccount + Role + RoleBinding with `pods/exec` on toolbox pods
+#   * Service targeting the sidecar's port 22
+#   * IngressRouteTCP on Traefik's `toolboxssh` entrypoint (:2222 externally)
+#   * Secret with the admin authorized_keys
+#   * Sidecar container injected via `gitlab.gitlab.toolbox.extraContainers`,
+#     using lscr.io/linuxserver/openssh-server with `kubectl` baked into a
+#     shared emptyDir via an init container — admins SSH in, then run
+#     `kubectl exec -it -l app=toolbox -c toolbox -- bash` to enter the
+#     toolbox container.
+# Auth: SSH public key only (no password). Provide the admin pubkey via
+# local-values.yaml; otherwise no one can connect.
+# @todo(sfroebel, helm/gitlab): add per-IP allowlist middleware on the
+# IngressRouteTCP before broader rollout.
+toolboxSsh:
+  enabled: true
+  publicKey: ""                                          # REQUIRED when enabled
+  username: admin
+  serviceName: gitlab-toolbox-ssh
+  serviceAccountName: gitlab-toolbox-ssh
+  secretName: gitlab-toolbox-ssh-key
+  # @todo(sfroebel, helm/gitlab): pin to a concrete linuxserver/openssh-server
+  # tag once we verify a stable one — the project's tags use a non-obvious
+  # format (e.g. `version-9.9_p1-r2-ls181`) and the bare `9.9_p1-r2-ls181`
+  # tag I tried first didn't exist.
+  sshdImage: lscr.io/linuxserver/openssh-server:latest
+  kubectlImage: curlimages/curl:8.20.0
+
+# cert-manager. This chart does NOT install its own cert-manager controller
+# any more (see `gitlab.installCertmanager: false` below). It expects a
+# cluster-wide cert-manager (e.g. the `cert-manager-cloudflare` helm release
+# in the `cert-manager` namespace) to be installed separately, along with a
+# `ClusterIssuer` named below. The chart only renders Certificate resources
+# (templates/certificates.yaml) which reference that ClusterIssuer; the
+# cluster-wide controller reconciles them and writes the TLS Secrets into
+# our release namespace.
+#
+# `email` is no longer used by this chart — the ClusterIssuer carries its
+# own ACME registration email. Left here to ease future rollback if we ever
+# need to render in-chart Issuer/ClusterIssuer resources again.
+certManager:
+  # Set enabled: true to have this chart render cert-manager Certificate
+  # resources. Requires a cluster-wide cert-manager controller + ClusterIssuer
+  # named below to already be installed. Off by default — cert-manager is a
+  # separate prerequisite; bring your own TLS secrets when disabled.
+  enabled: false
+  email: ""               # REQUIRED when enabled — ACME registration email
+  # Name of the cluster-wide ClusterIssuer the rendered Certificates point at.
+  # Must already exist on the cluster (kubectl get clusterissuer).
+  issuerName: letsencrypt
+
+# Auto-generated Secrets (stable across upgrades via `helm lookup`)
+valkeyAuth:
+  enabled: true
+  secretName: valkey-auth
+  existingSecret: ""
+  generatedPasswordLength: 32
+
+seaweedfsAuth:
+  enabled: true
+  secretName: seaweedfs-s3-config
+  existingSecret: ""
+
+# Credentials for the disposable runner-cache SeaweedFS (seaweedfs-cache).
+# Separate from the durable instance's creds so the two stores are fully
+# independent. Auto-generated + kept stable across upgrades via helm lookup.
+seaweedfsCacheAuth:
+  enabled: true
+  secretName: seaweedfs-cache-s3-config
+  existingSecret: ""
+
+gitssh:
+  enabled: true
+  # Empty so the IngressRouteTCP template defaults to
+  # `<release>-gitlab-shell`. Override here only if you've renamed the
+  # release or the GitLab subchart's gitlab-shell Service.
+  serviceName: ""
+  servicePort: 22
+
+# releaseNamespace — used in NOTES.txt and comments. Default `gitlab`;
+# override if you install into another ns. Also set
+# traefik.providers.kubernetesIngress.namespaces and
+# traefik.providers.kubernetesCRD.namespaces to match.
+releaseNamespace: gitlab
+
+
+# =============================================================================
+# Object storage — SeaweedFS buckets + bucket-init Job config
+# =============================================================================
+objectStorage:
+  # Keyed by subsystem (map, not list) so templates can reference by name,
+  # e.g. `.Values.objectStorage.buckets.registry`. The names on the right
+  # must stay in sync with `gitlab.global.appConfig.*.bucket` below —
+  # GitLab subchart values can't be templated from the umbrella, so both sides
+  # are hardcoded today.
+  buckets:
+    artifacts:       gitlab-artifacts
+    lfs:             gitlab-lfs
+    uploads:         gitlab-uploads
+    packages:        gitlab-packages
+    externalDiffs:   gitlab-external-diffs
+    terraformState:  gitlab-terraform-state
+    dependencyProxy: gitlab-dependency-proxy
+    ciSecureFiles:   gitlab-ci-secure-files
+    pages:           gitlab-pages
+    backups:         gitlab-backups
+    registry:        gitlab-registry
+    # runnerCache (gitlab-runner-cache) is NOT created on the durable store
+    # anymore — it lives on the disposable seaweedfs-cache instance, created
+    # by templates/job-seaweedfs-cache-bucket-init.yaml.
+    # postgresBackup is created by the bucket-init Job but not wired
+    # into GitLab — it's the pgBackRest repo for the hand-rolled
+    # Postgres (postgres.backup.s3.bucket). Kept here so bucket
+    # provisioning lives in one place.
+    postgresBackup:  gitlab-postgres-backup
+  bucketInit:
+    enabled: true
+    image: public.ecr.aws/aws-cli/aws-cli:latest
+
+
+# =============================================================================
+# Hand-rolled PostgreSQL — replaces the historical CNPG operator setup
+# =============================================================================
+# See docs/superpowers/specs/2026-06-02-cnpg-to-manual-postgres-design.md
+# and docs/superpowers/plans/2026-06-02-cnpg-to-manual-postgres.md for the
+# migration history (CNPG operator → hand-rolled).
+#
+# Renders a primary + standby StatefulSet pair (async streaming replication,
+# manual failover), a credentials Secret using the same lookup-preserve
+# pattern as Valkey / SeaweedFS, a ConfigMap holding postgresql.conf /
+# pg_hba.conf / pgbackrest.conf, and (when `backup.enabled`) a daily
+# pgBackRest CronJob writing to the SeaweedFS S3 endpoint. All resources
+# are normal Helm-tracked objects — `helm upgrade` reconciles them directly,
+# no hooks. Default enabled=false so a fresh install is explicit about
+# turning on the DB; production envs flip it true in their values-*.yaml.
+postgres:
+  enabled: true
+  # Container image for the hand-rolled PostgreSQL + pgBackRest.
+  # Defaults to <image.registry>/postgres-pgbackrest:18 when empty.
+  # Build the image from images/postgres-pgbackrest/Dockerfile and push
+  # it to your registry, then set this or image.registry accordingly.
+  image: ""
+  database: gitlabhq_production            # matches global.psql.database
+  appUser: gitlab                          # matches global.psql.username
+  superUser: postgres
+  replicationUser: replicator
+  # Number of async streaming standbys (each its own pod from the
+  # postgres-standby StatefulSet, slot-less, basebackup'd from primary).
+  # Bounded by the primary's max_wal_senders (10). Dev: 1 (or 0). Prod runs
+  # 2+ across distinct hosts for HA (see values-prod.yaml).
+  standby:
+    replicas: 1
+  # Spread the primary + every standby onto distinct nodes (host anti-affinity
+  # on app=postgres / kubernetes.io/hostname). "soft" = preferred (best-effort,
+  # never blocks scheduling — fine for dev); "hard" = required (guarantees
+  # distinct hosts; a standby with no free host stays Pending — use in prod
+  # with at least replicas+1 worker nodes).
+  antiAffinity: soft
+  # Secret name for the postgres credentials. Defaults to gitlab-postgres-app.
+  secretName: gitlab-postgres-app
+  storage:
+    size: 10Gi                             # dev-grade; override to 50Gi+ for prod
+    storageClass: ""                       # defaults to .Values.storageClass
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  # Conservative tuning. Mirrors the CNPG cluster's effective parameters
+  # on dev; raise shared_buffers / effective_cache_size for prod once
+  # we observe the working set.
+  parameters:
+    max_connections: "300"
+    shared_buffers: "256MB"
+    work_mem: "16MB"
+    maintenance_work_mem: "128MB"
+    effective_cache_size: "1GB"
+  backup:
+    enabled: false                         # flipped on in Phase 5
+    s3:
+      bucket: gitlab-postgres-backup
+      # SeaweedFS S3 Service name is NOT release-prefixed (same reason as
+      # gitlab-stack.s3Endpoint in templates/_helpers.tpl). Cross-namespace
+      # lookups don't get search-path expansion, so the full FQDN is built
+      # from .Values.global.dnsDomain + .Values.releaseNamespace at render.
+      endpointSvc: seaweedfs-s3
+      port: 8333
+    retentionFull: 2                       # dev; prod overrides to 7
+
+
+# =============================================================================
+# gitlab subchart
+# =============================================================================
+gitlab:
+  enabled: true
+
+  global:
+    edition: ee
+    storageClass: ""                    # set to storageClass at deploy time
+
+    hosts:
+      domain: ""                        # set to hostnames.gitlab at deploy time
+      https: true
+      ssh: ""                           # set to hostnames.ssh at deploy time
+      gitlab:
+        name: ""                        # set to hostnames.gitlab at deploy time
+        https: true
+      registry:
+        name: ""                        # set to hostnames.registry at deploy time
+        https: true
+
+    ingress:
+      provider: traefik
+      class: ""                         # set to ingressClassName at deploy time
+      enabled: true
+      # The cluster-wide cert-manager ClusterIssuer issues our certs via
+      # explicit Certificates in templates/certificates.yaml (one per
+      # public hostname). Don't let the GitLab subchart create the default
+      # HTTP-01 issuer, and don't add cert-manager.io/issuer to Ingress
+      # annotations — that would make ingress-shim race with our explicit
+      # Certificates and dedupe by Secret name (the bug we just fixed).
+      configureCertmanager: false
+      tls:
+        enabled: true
+      annotations:
+        traefik.ingress.kubernetes.io/router.entrypoints: websecure
+        traefik.ingress.kubernetes.io/router.tls: "true"
+
+    # --- Postgres: hand-rolled in-cluster ------------------------------------
+    # Note: `global.psql.ssl` is intentionally not set here. The GitLab
+    # chart's `ssl` block is mutual-TLS only — supplying it requires a
+    # secret with serverCA + clientCertificate + clientKey. Dev/default runs
+    # plaintext on the cluster network.
+    psql:
+      host: postgres-primary             # hand-rolled primary Service
+      port: 5432
+      database: gitlabhq_production
+      username: gitlab
+      password:
+        secret: gitlab-postgres-app      # must match postgres.secretName above
+        key: password
+
+    # --- Valkey ---------------------------------------------------------------
+    redis:
+      host: valkey
+      port: 6379
+      auth:
+        enabled: true
+        secret: valkey-auth
+        key: password
+
+    # --- Object storage: SeaweedFS S3 ---------------------------------------
+    appConfig:
+      object_store:
+        enabled: true
+        proxy_download: true
+        connection:
+          secret: gitlab-local-s3-connection
+          key: connection
+      lfs:
+        enabled: true
+        bucket: gitlab-lfs
+      artifacts:
+        enabled: true
+        bucket: gitlab-artifacts
+      uploads:
+        enabled: true
+        bucket: gitlab-uploads
+      packages:
+        enabled: true
+        bucket: gitlab-packages
+      externalDiffs:
+        enabled: true
+        bucket: gitlab-external-diffs
+      terraformState:
+        enabled: true
+        bucket: gitlab-terraform-state
+      dependencyProxy:
+        enabled: true
+        bucket: gitlab-dependency-proxy
+      ciSecureFiles:
+        enabled: true
+        bucket: gitlab-ci-secure-files
+      backups:
+        bucket: gitlab-backups
+      pages:
+        enabled: false
+        bucket: gitlab-pages
+
+    # --- Prometheus metrics auto-discovery (cluster prom-operator) ----------
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+
+    # --- SMTP ----------------------------------------------------------------
+    # Configure your outbound mail relay here. `authentication: none` is
+    # suitable for IP-allowlisted relays (e.g. Google Workspace SMTP relay);
+    # set `authentication: plain` and provide a `gitlab-smtp-creds` Secret
+    # for relays that require AUTH.
+    smtp:
+      enabled: false
+      address: ""
+      port: 587
+      domain: ""
+      authentication: none
+      starttls_auto: true
+      openssl_verify_mode: peer
+      open_timeout: 30
+      read_timeout: 60
+      pool: false
+
+    # Outbound "From"/Reply-To headers on mail GitLab sends (notifications,
+    # password resets, pipeline alerts, etc.). Display_name is what users
+    # see in their inbox sender column.
+    email:
+      from: ""
+      display_name: GitLab
+      reply_to: ""
+
+    # The GitLab chart's bundled MinIO subchart is gated on
+    # `global.minio.enabled` (not `minio.install`), so disabling it
+    # at the subchart level alone is not enough. Set both.
+    minio:
+      enabled: false
+
+    # The gitlab parent chart overrides the gitlab-runner.secret template to
+    # always return `{{ .Release.Name }}-gitlab-runner-secret` unless this
+    # global is set. Set it here so the runner Deployment mounts our
+    # SealedSecret-backed token secret instead of a chart-generated one.
+    runner:
+      registrationToken:
+        secret: gitlab-runner-token
+
+  # Disable bundled components we've replaced
+  postgresql:
+    install: false
+  redis:
+    install: false
+  nginx-ingress:
+    enabled: false
+  # cert-manager — disabled here. The chart relies on a cluster-wide
+  # cert-manager (installed separately via the `cert-manager-cloudflare`
+  # helm release in the `cert-manager` namespace) plus the `ClusterIssuer`
+  # named in `certManager.issuerName` at the top of this file. Two
+  # cert-manager controllers on the same cluster fight over Certificate
+  # reconciliation, so the GitLab-bundled one is off.
+  #
+  # `gitlab.installCertmanager: false` disables the cert-manager subchart
+  # dependency in the GitLab chart's Chart.yaml. The companion
+  # `gitlab.global.ingress.configureCertmanager: false` (set lower in this
+  # file) also disables the certmanager-issuer helper Job that would have
+  # created a LetsEncrypt Issuer in this namespace.
+  installCertmanager: false
+
+  # Per-Ingress TLS Secret names — see notes inline at the matching
+  # `registry:` / `gitlab:` blocks below. Each Ingress consumes its own
+  # per-host Secret populated by the matching Certificate in
+  # templates/certificates.yaml.
+  prometheus:
+    install: false                       # cluster prom-operator scrapes our SMs
+  # ----- GitLab Runner ------------------------------------------------------
+  # Kubernetes executor on the same cluster. Manager replica count and
+  # concurrent-job count are dev-grade here (1 × 5 = 5 parallel jobs);
+  # PRD overrides to 3 × 10 = 30. Build pods spawn in the release namespace
+  # (no dedicated runner namespace — accepted tradeoff documented in the
+  # spec). PSA `baseline` compatible: no privileged containers; pipelines
+  # that need to build images use BuildKit rootless (recipe in README).
+  #
+  # The runner authentication token (glrt-...) comes from a Secret named
+  # `gitlab-runner-token` key `runner-token`, materialized by the
+  # sealed-secrets controller from a committed SealedSecret manifest.
+  # See README "Sealed Secrets workflow" + manifests/sealed-secrets/.
+  gitlab-runner:
+    install: true
+    # Manager image pulled from registry.gitlab.com by default.
+    # Override image.registry if you route pulls through a proxy-cache.
+    image:
+      registry: registry.gitlab.com
+    gitlabUrl: ""                       # set to https://<hostnames.gitlab>/ at deploy time
+    replicas: 1
+    concurrent: 5
+    checkInterval: 30
+    logLevel: info
+    unregisterRunners: true
+    rbac:
+      create: true
+      clusterWideAccess: false
+      rules:
+        - apiGroups: [""]
+          resources: ["pods","pods/log","configmaps","services"]
+          verbs: ["get","list","watch","create","update","patch","delete"]
+        - apiGroups: [""]
+          resources: ["pods/exec","pods/attach"]
+          verbs: ["get","create","patch","delete"]
+        # `secrets` get/list/watch is needed for the executor to project
+        # secrets into build pods (pull credentials, ci-job-token, etc.);
+        # create/update/patch/delete is needed for credential helpers
+        # that the executor manages (e.g. image-pull docker-config
+        # secrets). `update` (HTTP PUT) is distinct from `patch` in
+        # Kubernetes RBAC — the executor PUTs to set ownerReferences on
+        # the per-job credential secret it creates, so without `update`
+        # every build pod fails at "setting owner references: secrets
+        # is forbidden".
+        #
+        # SCOPE TRADEOFF: this rule grants the executor read+write on
+        # EVERY secret in the release namespace, including data-plane
+        # secrets (postgres, valkey, seaweedfs, runner-token). A compromised
+        # .gitlab-ci.yml in any project could exfiltrate them. Accepted for
+        # single-tenant, trusted-users CI. For multi-tenant CI, move build
+        # pods to a dedicated namespace and tighten this rule.
+        - apiGroups: [""]
+          resources: ["secrets"]
+          verbs: ["get","list","watch","create","update","patch","delete"]
+        - apiGroups: [""]
+          resources: ["events"]
+          verbs: ["list","watch"]
+    serviceAccount:
+      create: true
+    runners:
+      # NOTE: `runners.secret` is intentionally NOT set here. The GitLab
+      # parent chart's `_runner.tpl` overrides the gitlab-runner subchart's
+      # `gitlab-runner.secret` template to always return
+      # `global.runner.registrationToken.secret` (see `gitlab.global.runner.
+      # registrationToken.secret` above in the global block). Setting
+      # `runners.secret` here is silently ignored.
+      cache:
+        # Cache creds point at the DISPOSABLE seaweedfs-cache instance, not
+        # the durable store (see seaweedfsCache block + secret-seaweedfs-cache-s3).
+        secretName: seaweedfs-cache-s3-config
+      # The runner TOML is tpl-processed by the gitlab-runner subchart's
+      # configmap template, so Helm template expressions resolve at render time.
+      # The `namespace` field uses .Values.runner.jobNamespace (set above).
+      config: |
+        [[runners]]
+          name = "k8s-runner"
+          executor = "kubernetes"
+          # FF_USE_LEGACY_S3_CACHE_ADAPTER: revert from aws-sdk-go-v2 to
+          # the legacy v1-SDK-based cache adapter. gitlab-runner 17.5+
+          # switched to v2, which adds `x-id=PutObject` (and similar) to
+          # presigned URLs and requires an explicit region. SeaweedFS
+          # 3.73 (our subchart's bundled server) does not include `x-id`
+          # in its canonical-query-string when validating sig v4, so
+          # every cache PUT/GET fails with `403 SignatureDoesNotMatch`.
+          # The v1 adapter does not add `x-id` and works fine with
+          # SeaweedFS. See gitlab-org/gitlab-runner#38300 +
+          # seaweedfs/seaweedfs#6761. Remove this flag once we upgrade
+          # the SeaweedFS subchart to a version with v2-compatible sig
+          # validation.
+          environment = [
+            "FF_USE_FASTZIP=1",
+            "FF_NETWORK_PER_BUILD=true",
+            "FF_USE_LEGACY_S3_CACHE_ADAPTER=true"
+          ]
+          [runners.kubernetes]
+            # Build pods land in a dedicated namespace whose PSA label
+            # is `privileged` — required because BuildKit-rootless needs
+            # `securityContext.seccompProfile.type: Unconfined`, which
+            # PSA `baseline` (the level on the GitLab release namespace)
+            # does not permit. See templates/runner-build-namespace.yaml.
+            namespace = "gitlab-runner-job"
+            # Default build pod image. Override in your values file to use
+            # a proxy-cache or a different base image.
+            image = "docker.io/library/ubuntu:24.04"
+            cpu_request = "100m"
+            cpu_limit = "1"
+            memory_request = "256Mi"
+            memory_limit = "2Gi"
+            service_cpu_request = "50m"
+            service_memory_request = "128Mi"
+            helper_cpu_request = "50m"
+            helper_memory_request = "128Mi"
+            poll_timeout = 600
+            # Helper image pulled via the Harbor proxy-cache, same project
+            # as the manager image. Version is pinned to the gitlab-runner
+            # subchart's appVersion via Helm template (the chart's
+            # configmap.yaml runs `tpl` on this string at render time), so
+            # subchart bumps update both manager and helper in lockstep. Arch
+            # is hardcoded `x86_64` — every node in this cluster is x86_64;
+            # add an `{{ "{{" }}.Arch{{ "}}" }}` runtime placeholder if/when
+            # ARM nodes get introduced. When `helper_image` is set explicitly
+            # the runner ignores `helper_image_flavor`, but `helper_image_flavor`
+            # below stays for documentation: it tells the reader which flavor
+            # the hardcoded path corresponds to.
+            helper_image = "registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:ubuntu-x86_64-v{{ .Chart.AppVersion }}"
+            helper_image_flavor = "ubuntu"
+            # NO `[runners.kubernetes.pod_security_context]` block. The
+            # gitlab-runner helper image (ubuntu flavor) runs as user
+            # `gitlab-runner` (uid 1001) with HOME=/home/gitlab-runner;
+            # overriding pod_security_context to a different uid (e.g.
+            # 1000) breaks the helper's HOME setup and `git clone` fails
+            # with "could not lock config file //.gitconfig: Permission
+            # denied". Build images that need a specific uid set their
+            # own USER (e.g. moby/buildkit:rootless runs as uid 1000 via
+            # its own Dockerfile). The pod-level default is permissive
+            # under PSA baseline, which is what this cluster enforces.
+            #
+            # `Unconfined` seccomp on the build container is REQUIRED for
+            # BuildKit-rootless and similar rootless-build tooling that
+            # calls `unshare(CLONE_NEWUSER)` and then `fork+exec
+            # /proc/self/exe` to enter the new user namespace. The
+            # kernel-default seccomp filter blocks these transitions for
+            # unprivileged callers, so `RuntimeDefault` would deny the
+            # exec with EPERM. PSA `baseline` allows `Unconfined`
+            # (restricted does not). The cluster also needs
+            # `user.max_user_namespaces > 0` sysctl on every worker
+            # (Talos disables it by default — see memory entry
+            # `talos-userns-disabled-by-default`).
+            [runners.kubernetes.build_container_security_context]
+              [runners.kubernetes.build_container_security_context.seccomp_profile]
+                type = "Unconfined"
+          [runners.cache]
+            Type = "s3"
+            Shared = true
+            Path = "runner"
+            [runners.cache.s3]
+              # Build pods run in the `gitlab-runner-build` namespace
+              # (PSA `privileged`) but the SeaweedFS S3 Service lives in
+              # the GitLab release namespace, so the FQDN is required —
+              # cross-namespace lookups don't get search-path expansion.
+              # The service name is `seaweedfs-s3` (NOT release-prefixed)
+              # because the seaweedfs subchart's `seaweedfs.name`
+              # template returns `.Chart.Name`, not `.Release.Name` —
+              # same reasoning as `gitlab-stack.s3Endpoint` in templates/
+              # _helpers.tpl.
+              #
+              # `{{ .Values.global.dnsDomain }}` resolves at chart-render
+              # time because the gitlab-runner subchart's configmap.yaml
+              # processes this whole config value through `tpl`. The
+              # subchart's `.Values.global.dnsDomain` is populated by
+              # Helm from the umbrella's top-level `global:` block (see
+              # the comment block at the top of this file). Net effect:
+              # the cluster DNS suffix lives in ONE place per env.
+              ServerAddress = "seaweedfs-cache-s3.{{ .Release.Namespace }}.svc.{{ .Values.global.dnsDomain }}:8333"
+              BucketName = "gitlab-runner-cache"
+              Insecure = true
+              AuthenticationType = "access-key"
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: false
+      runAsNonRoot: true
+      privileged: false
+      capabilities:
+        drop: ["ALL"]
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: false   # env-specific; flipped on in values-prod.yaml
+                         # once prometheus-operator is installed.
+  minio:
+    install: false                       # replaced by SeaweedFS
+
+  registry:
+    enabled: true
+    storage:
+      secret: gitlab-local-s3-registry
+      key: config
+      # Serve blob bytes through the registry pod instead of returning
+      # a 307 to the SeaweedFS S3 endpoint. SeaweedFS is in-cluster only,
+      # and even cross-namespace-FQDN'd the redirect URL is unreachable
+      # from `docker pull` clients — so every layer fetch fails after the
+      # redirect. With redirect disabled the registry proxies bytes itself.
+      # Slightly higher registry CPU; negligible at our scale, and the
+      # registry HPA (prod: 2-4 replicas) absorbs it.
+      redirect:
+        disable: true
+    ingress:
+      tls:
+        secretName: gitlab-registry-tls
+    # Dev-grade: single replica, modest resources. Prod scales up
+    # via values-prod.yaml.
+    hpa:
+      minReplicas: 1
+      maxReplicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+
+  # Per-Ingress TLS Secret names are set inline in each component block
+  # below — webservice (under gitlab.gitlab.webservice), kas (under
+  # gitlab.gitlab.kas), and registry (at gitlab.registry, above). Each
+  # secretName matches a Certificate in templates/certificates.yaml.
+
+  gitlab:
+    gitaly:
+      persistence:
+        enabled: true
+        # Dev-grade. Prod uses 50Gi via values-prod.yaml.
+        size: 2Gi
+        storageClass: ""                # defaults to .Values.storageClass
+      resources:
+        requests:
+          cpu: 200m
+          memory: 1Gi
+      metrics:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+    gitlab-shell:
+      service:
+        type: ClusterIP
+        internalPort: 2222
+        externalPort: 22
+      # gitlab-shell metrics require sshDaemon=gitlab-sshd. We use the
+      # default sshDaemon=openssh, which is incompatible with the metrics
+      # endpoint. Either flip sshDaemon to gitlab-sshd (and re-enable
+      # metrics) or leave metrics off — chosen the latter since the chart
+      # treats openssh as the supported default.
+      metrics:
+        enabled: false
+    webservice:
+      # Dev-grade: 1-2 replicas, modest resources. Prod scales to
+      # 3-10 with HPA at 70% CPU via values-prod.yaml.
+      minReplicas: 1
+      maxReplicas: 2
+      resources:
+        requests:
+          cpu: 200m
+          memory: 1500M
+      metrics:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+      ingress:
+        tls:
+          secretName: gitlab-tls
+    kas:
+      ingress:
+        tls:
+          secretName: gitlab-kas-tls
+    sidekiq:
+      minReplicas: 1
+      maxReplicas: 2
+      # --- Resource sizing -----------------------------------------------
+      # Sidekiq's working set is dominated by Rails + the loaded gem set,
+      # not by job payload. Observed peak across both dev and prod is
+      # ~1.5 GiB per pod even at near-idle job rates; the upstream chart's
+      # 768Mi default puts pods at 2× their memory request, which is the
+      # underlying cause of the historical CrashLoopBackOff cascade — pods
+      # near the wall get evicted under any node memory pressure. Bump
+      # request above the observed peak and add a hard limit so a memory
+      # spike can't take down a node.
+      resources:
+        requests:
+          cpu: 200m
+          memory: 1500Mi
+        limits:
+          memory: 2Gi
+      # --- HPA: memory-aware --------------------------------------------
+      # Sidekiq is memory-bound, not CPU-bound (observed CPU steady-state
+      # ~9% of request, memory steady-state ~95%). CPU-only HPA never
+      # fires while memory drifts toward the wall. Add a memory metric so
+      # the autoscaler responds to the actual constraint.
+      hpa:
+        cpu:
+          targetType: Utilization
+          targetAverageUtilization: 70
+        memory:
+          targetType: Utilization
+          targetAverageUtilization: 80
+      metrics:
+        enabled: true
+        # Sidekiq pods have no Service — the subchart ships a PodMonitor
+        # template, not a ServiceMonitor. The unused serviceMonitor key
+        # below is preserved for completeness but is a no-op for this
+        # subchart (kept rather than removed so a future refactor doesn't
+        # re-introduce a confused expectation that flipping it does
+        # anything).
+        serviceMonitor:
+          enabled: true
+        podMonitor:
+          enabled: true
+
+    # Toolbox SSH sidecar — see templates/toolbox-ssh.yaml for the
+    # surrounding ServiceAccount/Role/Service/IngressRouteTCP/Secret.
+    # The GitLab subchart's toolbox doesn't ship with a Service of its own,
+    # and `gitlab.gitlab.toolbox.extraContainers` is rendered via `tpl` so
+    # the strings below could use Helm syntax — but they don't need to;
+    # everything references stable Secret + image names hardcoded here to
+    # avoid scope-leak between umbrella and subchart contexts.
+    toolbox:
+      # SA created by the toolbox subchart itself with the name below; our
+      # umbrella's templates/toolbox-ssh.yaml only attaches Role + RoleBinding
+      # to it (so the sidecar can `kubectl exec` into the toolbox container).
+      serviceAccount:
+        enabled: true
+        create: true
+        name: gitlab-toolbox-ssh
+      extraInitContainers: |
+        - name: kubectl-install
+          # curlimages/curl is alpine-based and ships curl preinstalled — no
+          # `apk add` needed, so we don't run into CAP_CHOWN issues from the
+          # toolbox pod's restricted securityContext. Same container also
+          # stages the toolbox-exec wrapper and the s6-overlay init script
+          # that wires it into sshd_config as a ForceCommand for `admin`.
+          image: curlimages/curl:8.10.1
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              ver=v1.30.7
+              curl -sSL -o /shared-bin/kubectl \
+                "https://dl.k8s.io/release/${ver}/bin/linux/amd64/kubectl"
+              chmod 0755 /shared-bin/kubectl
+              /shared-bin/kubectl version --client=true --output=yaml
+
+              cat > /shared-bin/toolbox-exec <<'EOF'
+              #!/bin/sh
+              # SSH ForceCommand for the admin user — drops them straight into
+              # the toolbox container. Re-resolves the pod name on every login
+              # so a Deployment rollout doesn't strand the wrapper on a stale
+              # pod reference.
+              #
+              # sshd starts a clean session env that doesn't inherit the pod's
+              # KUBERNETES_* env vars, so kubectl would fall back to
+              # localhost:8080 if we relied on the in-cluster env auto-detect.
+              # Export them explicitly here — paired with the SA token mounted
+              # at /var/run/secrets/kubernetes.io/serviceaccount/ this is
+              # everything kubectl needs to find the in-cluster API.
+              set -eu
+              export KUBERNETES_SERVICE_HOST=kubernetes.default.svc
+              export KUBERNETES_SERVICE_PORT=443
+              POD=$(/usr/local/bin/kubectl -n {{ .Release.Namespace }} get pods \
+                -l app=toolbox -o jsonpath='{.items[0].metadata.name}')
+              [ -n "$POD" ] || { echo "no toolbox pod found" >&2; exit 1; }
+              exec /usr/local/bin/kubectl exec -it -n {{ .Release.Namespace }} "$POD" \
+                -c toolbox -- /bin/bash -l
+              EOF
+              chmod 0755 /shared-bin/toolbox-exec
+
+              cat > /shared-bin/30-force-command <<'EOF'
+              #!/bin/sh
+              # s6-overlay custom-cont-init script. linuxserver/openssh-server
+              # copies its defaults into /config/sshd/sshd_config on first
+              # start; we append a Match block here, idempotently.
+              set -eu
+              cfg=/config/sshd/sshd_config
+              if [ -f "$cfg" ] && ! grep -q 'ForceCommand /usr/local/bin/toolbox-exec' "$cfg"; then
+                printf '\nMatch User admin\n  ForceCommand /usr/local/bin/toolbox-exec\n' >> "$cfg"
+              fi
+              EOF
+              chmod 0755 /shared-bin/30-force-command
+          volumeMounts:
+            - name: toolbox-ssh-shared-bin
+              mountPath: /shared-bin
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      extraContainers: |
+        - name: toolbox-ssh
+          image: lscr.io/linuxserver/openssh-server:latest
+          ports:
+            - name: toolbox-ssh
+              containerPort: 2222
+              protocol: TCP
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: UTC
+            - name: USER_NAME
+              value: admin
+            - name: PASSWORD_ACCESS
+              value: "false"
+            - name: SUDO_ACCESS
+              value: "false"
+            - name: PUBLIC_KEY_FILE
+              value: /ssh-keys/authorized_keys
+          volumeMounts:
+            - name: toolbox-ssh-keys
+              mountPath: /ssh-keys
+              readOnly: true
+            - name: toolbox-ssh-shared-bin
+              mountPath: /usr/local/bin/kubectl
+              subPath: kubectl
+              readOnly: true
+            - name: toolbox-ssh-shared-bin
+              mountPath: /usr/local/bin/toolbox-exec
+              subPath: toolbox-exec
+              readOnly: true
+            - name: toolbox-ssh-shared-bin
+              mountPath: /custom-cont-init.d/30-force-command
+              subPath: 30-force-command
+              readOnly: true
+            - name: toolbox-ssh-config
+              mountPath: /config
+            - name: toolbox-ssh-tmp
+              mountPath: /tmp
+            - name: toolbox-ssh-run
+              mountPath: /run
+            # The toolbox pod runs with `automountServiceAccountToken: false`
+            # at pod level, so we project the SA token explicitly onto this
+            # sidecar (not the other containers) at the conventional path
+            # — kubectl auto-detects in-cluster config from this directory.
+            - name: toolbox-ssh-sa-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            # linuxserver/openssh-server's s6-overlay starts as root, chowns
+            # /run + /config to the configured PUID/PGID, then drops to that
+            # user. Override the toolbox pod's non-root default so this
+            # sidecar can do its preinit. Other GitLab containers in this
+            # pod keep their own securityContext from the toolbox subchart.
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "SETUID", "SETGID", "FOWNER", "DAC_OVERRIDE", "KILL"]
+            seccompProfile:
+              type: RuntimeDefault
+      extraVolumes: |
+        - name: toolbox-ssh-keys
+          secret:
+            secretName: gitlab-toolbox-ssh-key
+            items:
+              - key: authorized_keys
+                path: authorized_keys
+                mode: 0400
+        - name: toolbox-ssh-shared-bin
+          emptyDir: {}
+        - name: toolbox-ssh-config
+          emptyDir: {}
+        - name: toolbox-ssh-tmp
+          emptyDir: {}
+        - name: toolbox-ssh-run
+          emptyDir: {}
+        - name: toolbox-ssh-sa-token
+          projected:
+            defaultMode: 0420
+            sources:
+              - serviceAccountToken:
+                  expirationSeconds: 3607
+                  path: token
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
+
+
+# =============================================================================
+# Traefik — isolated via unique IngressClass + namespace-scoped providers
+# =============================================================================
+traefik:
+  enabled: true
+
+  deployment:
+    # Dev-grade: single replica. Prod uses 2 for HA via values-prod.yaml.
+    replicas: 1
+
+  # ----- Unique ingress class (isolation) -----------------------------------
+  ingressClass:
+    enabled: true
+    isDefaultClass: false               # do NOT grab every Ingress in the cluster
+    name: ""                            # set to ingressClassName at deploy time
+
+  # ----- Namespace-scoped providers -----------------------------------------
+  providers:
+    kubernetesIngress:
+      enabled: true
+      ingressClass: ""                  # set to ingressClassName at deploy time
+      namespaces:
+        - gitlab                        # must match the release namespace
+      allowCrossNamespace: false
+      allowEmptyServices: false
+      # Make Traefik populate `.status.loadBalancer.ingress[*].ip` on every
+      # Ingress it handles, copying the IP from its own LoadBalancer Service.
+      # external-dns watches that status field to learn what target to use
+      # when creating A records — without this, every Ingress shows an empty
+      # status and external-dns silently skips them.
+      publishedService:
+        enabled: true
+    kubernetesCRD:
+      enabled: true
+      ingressClass: ""                  # set to ingressClassName at deploy time
+      namespaces:
+        - gitlab                        # must match the release namespace
+      allowCrossNamespace: false
+      allowEmptyServices: false
+      allowExternalNameServices: false
+    kubernetesGateway:
+      enabled: false
+
+  service:
+    type: LoadBalancer
+    ipFamilyPolicy: SingleStack
+    ipFamilies: [IPv4]
+
+  ports:
+    web:
+      port: 8000
+      exposedPort: 80
+      redirectTo:
+        port: websecure
+        scheme: https
+    websecure:
+      port: 8443
+      exposedPort: 443
+      tls:
+        enabled: true
+        # No `certResolver` — Traefik consumes Secrets produced by cert-manager
+        # via each Ingress's tls[].secretName, instead of issuing its own.
+    ssh:
+      port: 2222
+      exposedPort: 22
+      expose:
+        default: true
+      protocol: TCP
+    metrics:
+      port: 9100
+      expose:
+        default: false
+      exposedPort: 9100
+      protocol: TCP
+
+  ingressRoute:
+    dashboard:
+      enabled: false
+
+  # No persistence: Traefik no longer stores ACME state on disk.
+  # cert-manager keeps issued certs in K8s Secrets, so Traefik is stateless
+  # and can scale (`traefik.deployment.replicas: 2` in values-prod.yaml).
+  persistence:
+    enabled: false
+
+  # No certificatesResolvers / envFrom for the Cloudflare token: Traefik is
+  # not the ACME client any more. DNS-01 issuance is handled entirely by the
+  # cluster-wide cert-manager (the separate cert-manager-cloudflare release
+  # in the cert-manager namespace owns the Cloudflare token); this chart
+  # neither renders nor needs a Cloudflare secret.
+
+  logs:
+    general:
+      level: INFO
+    access:
+      enabled: true
+
+  additionalArguments:
+    - "--serversTransport.insecureSkipVerify=false"
+
+  # ----- Prometheus metrics + auto-discovery -------------------------------
+  metrics:
+    prometheus:
+      enabled: true
+      service:
+        enabled: true
+      serviceMonitor:
+        # No `namespaceSelector` override — the subchart's template
+        # defaults `matchNames` to the release namespace, which is the
+        # correct behavior for both dev (gitlab-dev) and prod (gitlab).
+        enabled: true
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+
+# =============================================================================
+# Valkey — caching layer for GitLab Sidekiq/Rails
+# =============================================================================
+# Defaults are dev-grade (single instance, 2Gi storage, ACL auth via
+# existing secret). Prod scales to master+replica HA via
+# values-prod.yaml. Schema is `valkey-helm` 0.9.4 (StatefulSet,
+# proper Service/StatefulSet port alignment, `usersExistingSecret`
+# auth, ServiceMonitor/PodMonitor, NetworkPolicy, PDB).
+#
+# Auth: chart consumes `valkey-auth` Secret created by our umbrella
+# template. The `default` user's password lives at key `password`
+# (matched here via `passwordKey: password`). GitLab's redis client
+# references the same secret/key in `gitlab.global.redis.auth`.
+valkey:
+  enabled: true
+  fullnameOverride: "valkey"
+
+  image:
+    registry: docker.io
+    repository: valkey/valkey
+    # tag: ""  # use chart default (matches chart AppVersion)
+
+  service:
+    type: ClusterIP
+    port: 6379
+
+  auth:
+    enabled: true
+    usersExistingSecret: valkey-auth
+    aclUsers:
+      default:
+        permissions: "~* &* +@all"
+        passwordKey: password           # key in valkey-auth Secret
+
+  # Persistent storage for the standalone (single-master) deployment.
+  # In replica/HA mode (prod), per-pod storage comes from
+  # `replica.persistence` instead.
+  dataStorage:
+    enabled: true
+    volumeName: valkey-data
+    requestedSize: 2Gi
+    className: ""                        # defaults to .Values.storageClass
+    accessModes:
+      - ReadWriteOnce
+
+  # Single-instance in dev. Prod enables HA via values-prod.yaml.
+  replica:
+    enabled: false
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+    podMonitor:
+      enabled: false
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+
+# =============================================================================
+# SeaweedFS — replaces GitLab's bundled MinIO
+# =============================================================================
+# S3 service: `<release>-seaweedfs-s3.<ns>.svc.cluster.local:8333`.
+# Internal-only; exposed to other services via the cluster DNS.
+seaweedfs:
+  enabled: true
+  # Durable instance must render UN-prefixed (seaweedfs-*) so its STS PVC names
+  # and the seaweedfs-s3 service match the reattached data + the restored
+  # gitlab-local-s3-connection endpoint. The seaweedfs-split-cache work added
+  # nameOverride to the cache alias but dropped this from the durable block;
+  # without it the release-prefixed names orphan all object storage.
+  fullnameOverride: seaweedfs
+
+  # Dev-grade sizing across master/volume/filer. Prod scales up via
+  # values-prod.yaml (5Gi master, 3×50Gi volumes, 10Gi filer).
+  master:
+    enabled: true
+    replicas: 1
+    data:
+      type: persistentVolumeClaim
+      size: 2Gi
+      storageClass: ""                # defaults to .Values.storageClass
+    # Default `logs.type: hostPath` is blocked by PodSecurity Admission
+    # (baseline enforce on this cluster forbids hostPath). emptyDir is
+    # fine — logs are also captured by kubelet/journald via stdout.
+    logs:
+      type: emptyDir
+    metricsPort: 9327
+
+  volume:
+    enabled: true
+    replicas: 1
+    dataDirs:
+      - name: data1
+        type: persistentVolumeClaim
+        size: 5Gi
+        storageClass: ""                # defaults to .Values.storageClass
+        maxVolumes: 0
+    logs:
+      type: emptyDir
+    metricsPort: 9327
+
+  filer:
+    enabled: true
+    replicas: 1
+    data:
+      type: persistentVolumeClaim
+      size: 2Gi
+      storageClass: ""                # defaults to .Values.storageClass
+    logs:
+      type: emptyDir
+    metricsPort: 9327
+
+  s3:
+    enabled: true
+    replicas: 1
+    port: 8333
+    enableAuth: true
+    existingConfigSecret: seaweedfs-s3-config
+    service:
+      type: ClusterIP
+    # hostPath logs volume is also blocked by PSA baseline; same fix
+    # as master/volume/filer above.
+    logs:
+      type: emptyDir
+    metricsPort: 9327
+
+# =============================================================================
+# SeaweedFS — disposable runner-cache instance (aliased subchart)
+# =============================================================================
+# Second SeaweedFS, rendered as `seaweedfs-cache-*` via nameOverride. Stores
+# ONLY gitlab-runner-cache on emptyDir => zero persistent-storage footprint and a hard
+# isolation boundary from the durable store. Cache is regenerable, so loss on
+# pod restart is acceptable. Total emptyDir use is bounded at the SeaweedFS
+# layer (maxVolumes x volumeSizeLimitMB ~= 40GB) since the subchart renders a
+# bare emptyDir with no k8s sizeLimit. Disabled by default; enabled per-env.
+seaweedfsCache:
+  enabled: false
+  # Must be fullnameOverride (not nameOverride): the cache S3 service has to
+  # render UN-prefixed as `seaweedfs-cache-s3` so the bucket-init hook and the
+  # gitlab-runner cache config can reach it. nameOverride alone leaves the
+  # release prefix on and the bucket-init hook hangs (Could not connect to
+  # seaweedfs-cache-s3:8333). Mirrors the durable seaweedfs.fullnameOverride above.
+  fullnameOverride: seaweedfs-cache
+  master:
+    enabled: true
+    replicas: 1
+    volumeSizeLimitMB: 1000
+    garbageThreshold: 0.05
+    data:
+      type: emptyDir
+    logs:
+      type: emptyDir
+    metricsPort: 9327
+  volume:
+    enabled: true
+    replicas: 1
+    # No PVCs here (emptyDir), so the subchart's volume-resize-hook is moot;
+    # disable it (also avoids the hook's backoffLimit bug — see the durable
+    # seaweedfs.volume.resizeHook note in values-prod.yaml).
+    resizeHook:
+      enabled: false
+    dataDirs:
+      - name: data1
+        type: emptyDir
+        maxVolumes: 40        # 40 x 1000MB => ~40GB ceiling on node ephemeral disk
+    idx:
+      type: emptyDir
+    logs:
+      type: emptyDir
+    metricsPort: 9327
+  filer:
+    enabled: true
+    replicas: 1
+    data:
+      type: emptyDir
+    logs:
+      type: emptyDir
+    metricsPort: 9327
+  s3:
+    enabled: true
+    # Scaled for concurrent cache uploads — the single durable gateway was the
+    # bottleneck behind parallel-job upload timeouts.
+    replicas: 2
+    port: 8333
+    enableAuth: true
+    existingConfigSecret: seaweedfs-cache-s3-config
+    logs:
+      type: emptyDir
+    metricsPort: 9327
+
+# =============================================================================
+# SeaweedFS capacity alerts (PrometheusRule)
+# =============================================================================
+# Rendered template: templates/seaweedfs-prometheusrule.yaml. Fires on
+# the canary condition that caused the 2026-05-18 registry outage
+# (master sees zero writable volumes for a collection) plus a leading-
+# indicator disk-low warning. See the template file for metric
+# provenance.
+seaweedfsAlerts:
+  enabled: true
+  # Extra labels applied to the PrometheusRule. Use these if your
+  # prometheus-operator install uses a `ruleSelector` other than the
+  # release/namespace defaults (e.g. kube-prometheus-stack ships with
+  # `release: <stack-release>` as the selector).
+  ruleSelectorLabels: {}
+
+# =============================================================================
+# Registry offline garbage-collect CronJob
+# =============================================================================
+# Rendered template: templates/cronjob-registry-gc.yaml. See that file's
+# header for the safety posture (disabled+dry-run-by-default; concurrent
+# writes during a real GC can orphan layers). Online GC (the registry's
+# write-time collector) requires the registry metadata database, which
+# is a separate Phase — not toggled here.
+registryGc:
+  # Off by default — operator must validate with a one-shot Job render
+  # before scheduling against production storage.
+  enabled: false
+  # Off-peak window. Sunday 03:00 UTC. Adjust if weekend CI is non-quiet.
+  schedule: "0 3 * * 0"
+  # Dry-run reports what would be freed without deleting. Flip to false
+  # only after reviewing a dry-run output and arranging a low-traffic
+  # maintenance window — concurrent writes during a real GC scan can
+  # orphan layers the scan missed.
+  dryRun: true
+  # `-m` (the actual flag for `registry garbage-collect`) marks
+  # untagged manifests as deletion candidates. Without it, GC only
+  # reaps blobs already orphaned by explicit deletes — rarely the
+  # actual disk hog. Keep on for meaningful cleanup; turn off only if
+  # diagnosing layer-loss suspicions.
+  deleteUntagged: true
+  # Pin to the registry image used by the running deployment. Update
+  # in lockstep when the gitlab subchart bumps its CNG-image set, so
+  # GC and the registry agree on storage layout.
+  image: registry.gitlab.com/gitlab-org/build/cng/gitlab-container-registry:v4.40.1-gitlab
+
+# =============================================================================
+# SeaweedFS S3 housekeeping (CronJobs)
+# =============================================================================
+# Defensive maintenance for the in-cluster SeaweedFS S3 store. Multipart
+# upload cleanup removes parts left behind by aborted PUTs (registry,
+# artifacts, pgBackRest all use multipart for large objects). Per-env
+# overrides flip `enabled: true` on the environments where it should run —
+# off by default so a default install doesn't suddenly schedule new jobs.
+seaweedfsHousekeeping:
+  multipartCleanup:
+    enabled: false
+    schedule: "30 2 * * 0"        # Sunday 02:30 UTC
+    # Drop multipart uploads older than this. Default matches the default
+    # in `weed shell s3.clean.uploads` (24h).
+    olderThan: 24h
+  # Filer/volume consistency check. Auto-purges dangling filer entries in
+  # the disposable cache collection (self-healing) and reports dangling
+  # entries in every other collection for human triage. See
+  # templates/cronjob-seaweedfs-fsck.yaml for the full rationale.
+  fsck:
+    enabled: false
+    schedule: "0 4 * * 0"         # Sunday 04:00 UTC (after registryGc 03:00)
+    # The only collection auto-purged. MUST be a disposable collection —
+    # entries here regenerate on a cache miss, so an over-aggressive purge
+    # costs a cache rebuild, never real data.
+    cacheCollection: gitlab-runner-cache
+    # kubectl + shell image (rancher/kubectl is FROM-scratch and can't run
+    # the scale/drain/exec orchestration). Pulled via the harbor proxy.
+    image: docker.io/alpine/k8s:1.36.2
+    # fsck races against in-flight writes, so quiesce CI before scanning:
+    # scale the runner manager to 0, wait for the build namespace to drain,
+    # scan, then always restore the original replica count.
+    quiesceRunners:
+      enabled: true
+      deployment: ""                # default: "<release>-gitlab-runner"
+      buildNamespace: gitlab-runner-build
+      drainTimeoutSeconds: 900
