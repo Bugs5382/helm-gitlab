@@ -184,11 +184,6 @@ objectStorage:
     # runnerCache (gitlab-runner-cache) is NOT created on the durable store
     # anymore — it lives on the disposable seaweedfs-cache instance, created
     # by templates/job-seaweedfs-cache-bucket-init.yaml.
-    # postgresBackup is created by the bucket-init Job but not wired
-    # into GitLab — it's the pgBackRest repo for the hand-rolled
-    # Postgres (postgres.backup.s3.bucket). Kept here so bucket
-    # provisioning lives in one place.
-    postgresBackup:  gitlab-postgres-backup
   bucketInit:
     enabled: true
     image: public.ecr.aws/aws-cli/aws-cli:latest
@@ -203,12 +198,11 @@ objectStorage:
 #
 # Renders a primary + standby StatefulSet pair (async streaming replication,
 # manual failover), a credentials Secret using the same lookup-preserve
-# pattern as Valkey / SeaweedFS, a ConfigMap holding postgresql.conf /
-# pg_hba.conf / pgbackrest.conf, and (when `backup.enabled`) a daily
-# pgBackRest CronJob writing to the SeaweedFS S3 endpoint. All resources
-# are normal Helm-tracked objects — `helm upgrade` reconciles them directly,
-# no hooks. Default enabled=false so a fresh install is explicit about
-# turning on the DB; production envs flip it true in their values-*.yaml.
+# pattern as Valkey / SeaweedFS, and a ConfigMap holding postgresql.conf /
+# pg_hba.conf. All resources are normal Helm-tracked objects — `helm upgrade`
+# reconciles them directly, no hooks. Default enabled=false so a fresh install
+# is explicit about turning on the DB; production envs flip it true in their
+# values-*.yaml.
 postgres:
   enabled: true
   # Container image for the hand-rolled PostgreSQL + pgBackRest.
@@ -253,17 +247,6 @@ postgres:
     work_mem: "16MB"
     maintenance_work_mem: "128MB"
     effective_cache_size: "1GB"
-  backup:
-    enabled: false                         # flipped on in Phase 5
-    s3:
-      bucket: gitlab-postgres-backup
-      # SeaweedFS S3 Service name is NOT release-prefixed (same reason as
-      # gitlab-stack.s3Endpoint in templates/_helpers.tpl). Cross-namespace
-      # lookups don't get search-path expansion, so the full FQDN is built
-      # from .Values.global.dnsDomain + .Values.releaseNamespace at render.
-      endpointSvc: seaweedfs-s3
-      port: 8333
-    retentionFull: 2                       # dev; prod overrides to 7
 
 
 # =============================================================================
@@ -1282,71 +1265,3 @@ seaweedfsAlerts:
   # release/namespace defaults (e.g. kube-prometheus-stack ships with
   # `release: <stack-release>` as the selector).
   ruleSelectorLabels: {}
-
-# =============================================================================
-# Registry offline garbage-collect CronJob
-# =============================================================================
-# Rendered template: templates/cronjob-registry-gc.yaml. See that file's
-# header for the safety posture (disabled+dry-run-by-default; concurrent
-# writes during a real GC can orphan layers). Online GC (the registry's
-# write-time collector) requires the registry metadata database, which
-# is a separate Phase — not toggled here.
-registryGc:
-  # Off by default — operator must validate with a one-shot Job render
-  # before scheduling against production storage.
-  enabled: false
-  # Off-peak window. Sunday 03:00 UTC. Adjust if weekend CI is non-quiet.
-  schedule: "0 3 * * 0"
-  # Dry-run reports what would be freed without deleting. Flip to false
-  # only after reviewing a dry-run output and arranging a low-traffic
-  # maintenance window — concurrent writes during a real GC scan can
-  # orphan layers the scan missed.
-  dryRun: true
-  # `-m` (the actual flag for `registry garbage-collect`) marks
-  # untagged manifests as deletion candidates. Without it, GC only
-  # reaps blobs already orphaned by explicit deletes — rarely the
-  # actual disk hog. Keep on for meaningful cleanup; turn off only if
-  # diagnosing layer-loss suspicions.
-  deleteUntagged: true
-  # Pin to the registry image used by the running deployment. Update
-  # in lockstep when the gitlab subchart bumps its CNG-image set, so
-  # GC and the registry agree on storage layout.
-  image: registry.gitlab.com/gitlab-org/build/cng/gitlab-container-registry:v4.40.1-gitlab
-
-# =============================================================================
-# SeaweedFS S3 housekeeping (CronJobs)
-# =============================================================================
-# Defensive maintenance for the in-cluster SeaweedFS S3 store. Multipart
-# upload cleanup removes parts left behind by aborted PUTs (registry,
-# artifacts, pgBackRest all use multipart for large objects). Per-env
-# overrides flip `enabled: true` on the environments where it should run —
-# off by default so a default install doesn't suddenly schedule new jobs.
-seaweedfsHousekeeping:
-  multipartCleanup:
-    enabled: false
-    schedule: "30 2 * * 0"        # Sunday 02:30 UTC
-    # Drop multipart uploads older than this. Default matches the default
-    # in `weed shell s3.clean.uploads` (24h).
-    olderThan: 24h
-  # Filer/volume consistency check. Auto-purges dangling filer entries in
-  # the disposable cache collection (self-healing) and reports dangling
-  # entries in every other collection for human triage. See
-  # templates/cronjob-seaweedfs-fsck.yaml for the full rationale.
-  fsck:
-    enabled: false
-    schedule: "0 4 * * 0"         # Sunday 04:00 UTC (after registryGc 03:00)
-    # The only collection auto-purged. MUST be a disposable collection —
-    # entries here regenerate on a cache miss, so an over-aggressive purge
-    # costs a cache rebuild, never real data.
-    cacheCollection: gitlab-runner-cache
-    # kubectl + shell image (rancher/kubectl is FROM-scratch and can't run
-    # the scale/drain/exec orchestration). Pulled via the harbor proxy.
-    image: docker.io/alpine/k8s:1.36.2
-    # fsck races against in-flight writes, so quiesce CI before scanning:
-    # scale the runner manager to 0, wait for the build namespace to drain,
-    # scan, then always restore the original replica count.
-    quiesceRunners:
-      enabled: true
-      deployment: ""                # default: "<release>-gitlab-runner"
-      buildNamespace: gitlab-runner-build
-      drainTimeoutSeconds: 900
