@@ -1,0 +1,38 @@
+# Apache License 2.0
+#
+# Copyright 2026 Shane
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: Label Sync
+# Reconciles the repo's labels to the canonical set (.github/labels.yml):
+# creates/updates the canonical labels AND deletes any label not in the file,
+# so every repo carries exactly the standard set (no stale GitHub defaults or
+# leftover release labels).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/labels.yml']
+permissions:
+  issues: write
+jobs:
+  labeler:
+    name: Sync labels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crazy-max/ghaction-github-labeler@v5
+        with:
+          yaml-file: .github/labels.yml
+          skip-delete: false
+          dry-run: false

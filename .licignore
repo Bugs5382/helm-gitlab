@@ -1,0 +1,26 @@
+# GoLic ignore file — https://github.com/Bugs5382/golic
+# Ignore everything...
+*
+
+# ...but inject the Apache-2.0 header into these source types:
+!*.yaml
+!*.yml
+!*.sh
+!*.tpl
+!Dockerfile
+
+# ...even when they live in subdirectories:
+!*/
+
+# Never: the license texts, Markdown (no header), vendored subcharts,
+# the docs site, dependencies, build output, and scratch:
+/LICENSE
+/NOTICE
+**/*.md
+/charts/**
+**/charts/**
+/website/**
+/node_modules/**
+**/node_modules/**
+/docs/**
+/.superpowers/**

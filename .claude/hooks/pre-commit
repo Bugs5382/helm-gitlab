@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Git pre-commit hook (enforcement).
+# - AI-tell phrases are banned, EXCEPT in files whose purpose is to document
+#   the rule (CLAUDE.md, the governance hooks, the pattern list), which
+#   legitimately contain those phrases as examples.
+# - Emoji are ALLOWED everywhere (no emoji blocking).
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+# shellcheck source=/dev/null
+source "$ROOT/.claude/hooks/lib.sh"
+
+is_binary() {
+  case "$1" in
+    *.png|*.jpg|*.jpeg|*.gif|*.pdf|*.ico|*.svg|*.woff|*.woff2|*.ttf|*.eot|*.zip|*.gz|*.jar|*.keystore) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Paths exempt from the AI-tell TEXT scan.
+tells_exempt() {
+  case "$1" in
+    CLAUDE.md|*/CLAUDE.md) return 0 ;;
+    .claude/*|*/.claude/*) return 0 ;;
+    governance/*|*/governance/*) return 0 ;;
+    .github/workflows/*|*workflows/*.yml|*workflows/*.yaml) return 0 ;;
+    *forbidden-text.txt) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+fail=0
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  case "$f" in .git/*) continue ;; esac
+  is_binary "$f" && continue
+
+  if ! tells_exempt "$f"; then
+    tells="$(gov_find_text_tells < "$f")"
+    if [ -n "$tells" ]; then echo "pre-commit: AI-tell not allowed in $f:" >&2; echo "$tells" >&2; fail=1; fi
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+[ "$fail" -eq 0 ] || { echo "pre-commit: blocked. Remove the above before committing." >&2; exit 1; }
+exit 0
