@@ -20,10 +20,10 @@ first and one of the two charts breaks at render time.
 
 The visible failure was:
 
-    Error: idcc-gitlab-stack/charts/valkey/templates/tests/auth.yaml:100:16
+    Error: helm-gitlab/charts/valkey/templates/tests/auth.yaml:100:16
       executing "valkey.image" at <include "common.image" (dict ...)>:
       error calling include:
-    idcc-gitlab-stack/charts/seaweedfs/templates/_helpers.tpl:88:36
+    helm-gitlab/charts/seaweedfs/templates/_helpers.tpl:88:36
       executing "common.image" at <.Values.image.registry>:
       nil pointer evaluating interface {}.image
 

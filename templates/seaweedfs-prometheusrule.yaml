@@ -5,7 +5,7 @@ The .Values gate below short-circuits template execution when the
 seaweedfsAlerts feature is turned off — useful if a cluster doesn't
 have prometheus-operator (monitoring.coreos.com/v1 CRDs absent) or
 the operator isn't configured to load PrometheusRule from this
-namespace. On both IDCC clusters kube-prometheus-stack is installed
+namespace. On clusters where kube-prometheus-stack is installed
 with open rule discovery, so the default is on.
 
 The rules below target the failure mode observed 2026-05-18: the

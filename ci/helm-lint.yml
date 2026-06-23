@@ -16,7 +16,7 @@
 # ci/helm-lint.yml
 #
 # Reusable Helm-chart lint job. Consumed via `include:` from the root
-# `.gitlab-ci.yml`. Will be relocated to a shared IDCC CI-templates repo
+# `.gitlab-ci.yml`. Will be relocated to a shared CI-templates repo
 # once that exists — the in-repo path is a transition stage.
 #
 # Naming follows CLAUDE.md §15 + memory/feedback-gitlab-ci-stage-naming.md:
