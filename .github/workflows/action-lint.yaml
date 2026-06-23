@@ -1,0 +1,44 @@
+# Apache License 2.0
+#
+# Copyright 2026 Shane
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: "Actionlint"
+# Validate the GitHub Actions workflow files. The other PR checks don't verify
+# that a workflow is actually runnable, so a malformed one (e.g. an invalid job
+# id) can merge green and only fail at startup on main. actionlint catches that
+# class at PR time. shellcheck integration is disabled (-shellcheck=) to keep
+# the gate focused on workflow validity; drop that flag to also lint run: shell.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths: [".github/workflows/**"]
+permissions:
+  contents: read
+jobs:
+  actionlint:
+    name: 🧹 Actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+      - name: 🐹 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: 🧹 Run actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          "$(go env GOPATH)/bin/actionlint" -color -shellcheck=
