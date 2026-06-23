@@ -1,0 +1,9 @@
+# internal design history — not for publication
+docs/superpowers/
+# subagent-driven progress ledger (scratch)
+.superpowers/
+# docs site build artifacts / deps
+website/node_modules/
+website/build/
+website/.docusaurus/
+node_modules/
