@@ -171,6 +171,8 @@ spec:
                 - pg_isready
                 - -U
                 - {{ .Values.postgres.appUser }}
+                - -d
+                - {{ .Values.postgres.database }}
             initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 5
@@ -181,6 +183,8 @@ spec:
                 - pg_isready
                 - -U
                 - {{ .Values.postgres.appUser }}
+                - -d
+                - {{ .Values.postgres.database }}
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
