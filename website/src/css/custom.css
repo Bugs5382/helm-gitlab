@@ -1,30 +1,85 @@
 /**
- * Any CSS included here will be global. The classic template
- * bundles Infima by default. Infima is a CSS framework designed to
- * work well for content-centric websites.
+ * Global styles. GitLab-branded docs theme: Bricolage Grotesque display,
+ * IBM Plex Sans/Mono, GitLab orange accent on a deep-purple hero.
+ *
+ * NOTE: this is an UNOFFICIAL project. "GitLab" and the GitLab logo are
+ * trademarks of GitLab Inc., used here for identification only. See the
+ * disclaimer in the site footer.
  */
 
-/* You can override the default Infima variables here. */
 :root {
-  --ifm-color-primary: #2e8555;
-  --ifm-color-primary-dark: #29784c;
-  --ifm-color-primary-darker: #277148;
-  --ifm-color-primary-darkest: #205d3b;
-  --ifm-color-primary-light: #33925d;
-  --ifm-color-primary-lighter: #359962;
-  --ifm-color-primary-lightest: #3cad6e;
-  --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --ifm-font-family-base: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ifm-heading-font-family: 'Bricolage Grotesque', var(--ifm-font-family-base);
+  --ifm-font-family-monospace: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+
+  /* GitLab orange, darkened for accessible links on white */
+  --ifm-color-primary: #d2401a;
+  --ifm-color-primary-dark: #bd3a17;
+  --ifm-color-primary-darker: #b23615;
+  --ifm-color-primary-darkest: #932d12;
+  --ifm-color-primary-light: #e2542d;
+  --ifm-color-primary-lighter: #fc6d26;
+  --ifm-color-primary-lightest: #fc8e5a;
+
+  --ifm-code-font-size: 92%;
+  --ifm-heading-font-weight: 700;
+  --docusaurus-highlighted-code-line-bg: rgba(252, 109, 38, 0.12);
+
+  /* homepage palette — GitLab deep purple + orange */
+  --hg-ink: #18122b;
+  --hg-ink-2: #241a3f;
+  --hg-line: rgba(252, 109, 38, 0.14);
+  --hg-accent: #fc6d26;
+  --hg-accent-2: #fca326;
+  --hg-glow: rgba(252, 109, 38, 0.22);
+  --hg-shadow: rgba(252, 109, 38, 0.5);
+  --hg-muted: #b9b3c9;
 }
 
-/* For readability concerns, you should choose a lighter palette in dark mode. */
 [data-theme='dark'] {
-  --ifm-color-primary: #25c2a0;
-  --ifm-color-primary-dark: #21af90;
-  --ifm-color-primary-darker: #1fa588;
-  --ifm-color-primary-darkest: #1a8870;
-  --ifm-color-primary-light: #29d5b0;
-  --ifm-color-primary-lighter: #32d8b4;
-  --ifm-color-primary-lightest: #4fddbf;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --ifm-color-primary: #fc8e5a;
+  --ifm-color-primary-dark: #fc7a3c;
+  --ifm-color-primary-darker: #fc6d26;
+  --ifm-color-primary-darkest: #e2542d;
+  --ifm-color-primary-light: #fca271;
+  --ifm-color-primary-lighter: #fdb085;
+  --ifm-color-primary-lightest: #fec6a6;
+  --docusaurus-highlighted-code-line-bg: rgba(252, 163, 38, 0.16);
+  --ifm-background-color: #14101f;
+  --ifm-background-surface-color: #1c1630;
+}
+
+h1, h2, h3, .hero__title {
+  letter-spacing: -0.02em;
+}
+
+.navbar__title {
+  font-family: var(--ifm-heading-font-family);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+div[class^='codeBlockContainer'] {
+  border: 1px solid var(--hg-line);
+  border-radius: 10px;
+}
+
+/* Footer — match the hero's deep GitLab-purple slab */
+.footer {
+  background: radial-gradient(120% 140% at 18% 0%, #2a1a4a 0%, var(--hg-ink-2) 45%, var(--hg-ink) 100%);
+  border-top: 1px solid var(--hg-line);
+  --ifm-footer-title-color: #fbf7ff;
+  --ifm-footer-link-hover-color: var(--hg-accent);
+}
+
+/* Footer disclaimer note */
+.footer__disclaimer {
+  max-width: 60rem;
+  margin: 1.5rem auto 0;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  opacity: 0.72;
+  text-align: center;
 }
