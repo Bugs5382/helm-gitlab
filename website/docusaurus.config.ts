@@ -7,7 +7,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'helm-gitlab',
   tagline: 'A self-hosted, bring-your-own-datastores GitLab Helm chart.',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/gitlab-logo.png',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
@@ -26,6 +26,24 @@ const config: Config = {
   trailingSlash: false,
 
   onBrokenLinks: 'throw',
+
+  headTags: [
+    {
+      tagName: 'link',
+      attributes: {rel: 'preconnect', href: 'https://fonts.googleapis.com'},
+    },
+    {
+      tagName: 'link',
+      attributes: {
+        rel: 'preconnect',
+        href: 'https://fonts.gstatic.com',
+        crossorigin: 'anonymous',
+      },
+    },
+  ],
+  stylesheets: [
+    'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap',
+  ],
 
   // Even if you don't use internationalization, you can use this field to set
   // useful metadata like html lang. For example, if your site is Chinese, you
@@ -61,8 +79,8 @@ const config: Config = {
     navbar: {
       title: 'helm-gitlab',
       logo: {
-        alt: 'helm-gitlab Logo',
-        src: 'img/logo.svg',
+        alt: 'GitLab tanuki logo — unofficial project',
+        src: 'img/gitlab-logo.png',
       },
       items: [
         {
@@ -100,7 +118,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Shane. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Shane. Built with Docusaurus.<div class="footer__disclaimer">Unofficial, community project — <strong>not affiliated with, endorsed by, or sponsored by GitLab Inc.</strong> &ldquo;GitLab&rdquo;, the GitLab logo, and the tanuki are trademarks of GitLab Inc., used here for identification only.</div>`,
     },
     prism: {
       theme: prismThemes.github,

@@ -1,23 +1,219 @@
-/**
- * CSS files with the .module.css suffix will be treated as CSS modules
- * and scoped locally.
- */
+/* Homepage hero — deep GitLab-purple slab, blueprint grid + orange glow. */
 
-.heroBanner {
-  padding: 4rem 0;
-  text-align: center;
+.hero {
   position: relative;
   overflow: hidden;
+  background: radial-gradient(120% 120% at 80% -10%, #3a2168 0%, var(--hg-ink-2) 40%, var(--hg-ink) 100%);
+  color: #ece8f4;
+  padding: 6rem 0 6.5rem;
+  border-bottom: 1px solid var(--hg-line);
+}
+
+.heroGrid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--hg-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--hg-line) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(110% 90% at 70% 0%, #000 30%, transparent 80%);
+  opacity: 0.7;
+}
+
+.heroGlow {
+  position: absolute;
+  top: -30%;
+  right: -10%;
+  width: 60vw;
+  height: 60vw;
+  max-width: 760px;
+  max-height: 760px;
+  background: radial-gradient(circle, var(--hg-glow), transparent 62%);
+  filter: blur(8px);
+  pointer-events: none;
+}
+
+.heroInner {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: 3.5rem;
+  align-items: center;
+}
+
+.heroCopy {
+  animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  color: var(--hg-accent-2);
+  text-transform: lowercase;
+  margin-bottom: 1.1rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--hg-line);
+  border-radius: 999px;
+  background: rgba(252, 109, 38, 0.08);
+}
+
+.kickerDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--hg-accent);
+  box-shadow: 0 0 0 0 rgba(252, 109, 38, 0.7);
+  animation: pulse 2.2s infinite;
+}
+
+.title {
+  font-size: clamp(2.7rem, 6vw, 4.4rem);
+  line-height: 0.98;
+  margin: 0 0 1.2rem;
+  letter-spacing: -0.035em;
+  color: #fbf7ff;
+}
+
+.titleAccent {
+  background: linear-gradient(92deg, var(--hg-accent), var(--hg-accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  color: var(--hg-muted);
+  max-width: 33rem;
+  margin-bottom: 2rem;
+}
+
+.subtitle strong {
+  color: #fbf7ff;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+}
+
+.btnPrimary,
+.btnGhost {
+  font-family: var(--ifm-heading-font-family);
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+  text-decoration: none;
+}
+
+.btnPrimary {
+  background: linear-gradient(92deg, var(--hg-accent), var(--hg-accent-2));
+  color: #2b1500;
+  box-shadow: 0 10px 30px -10px rgba(252, 109, 38, 0.6);
+}
+
+.btnPrimary:hover {
+  transform: translateY(-2px);
+  color: #2b1500;
+  box-shadow: 0 16px 38px -12px rgba(252, 109, 38, 0.78);
+}
+
+.btnGhost {
+  color: #e8e2f2;
+  border: 1px solid var(--hg-line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.btnGhost:hover {
+  transform: translateY(-2px);
+  color: #fff;
+  border-color: var(--hg-accent);
+}
+
+/* Terminal card */
+.terminal {
+  background: rgba(13, 9, 24, 0.82);
+  border: 1px solid var(--hg-line);
+  border-radius: 14px;
+  box-shadow: 0 30px 60px -28px rgba(0, 0, 0, 0.85);
+  overflow: hidden;
+  backdrop-filter: blur(6px);
+  animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) 0.12s both;
+}
+
+.termBar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--hg-line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.termDot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #4a4063;
+}
+.termDot[data-c='r'] { background: #ff5f57; }
+.termDot[data-c='y'] { background: #febc2e; }
+.termDot[data-c='g'] { background: #28c840; }
+
+.termTitle {
+  margin-left: 0.5rem;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.76rem;
+  color: var(--hg-muted);
+}
+
+.termBody {
+  margin: 0;
+  padding: 1.2rem 1.3rem 1.4rem;
+  background: transparent;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.86rem;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.termBody code {
+  display: block;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: #e3dcf0;
+}
+
+.comment { color: #8a7ea3; font-style: italic; }
+.cmd { color: #efe9f7; }
+.flag { color: var(--hg-accent-2); }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(252, 109, 38, 0.6); }
+  70% { box-shadow: 0 0 0 7px rgba(252, 109, 38, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(252, 109, 38, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heroCopy, .terminal, .kickerDot { animation: none; }
 }
 
 @media screen and (max-width: 996px) {
-  .heroBanner {
-    padding: 2rem;
-  }
-}
-
-.buttons {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  .hero { padding: 3.5rem 0 4rem; }
+  .heroInner { grid-template-columns: 1fr; gap: 2.2rem; }
 }
