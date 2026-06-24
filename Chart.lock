@@ -1,7 +1,7 @@
 dependencies:
 - name: gitlab
   repository: https://charts.gitlab.io
-  version: 9.11.6
+  version: 10.1.1
 - name: traefik
   repository: https://traefik.github.io/charts
   version: 32.1.1
@@ -14,5 +14,5 @@ dependencies:
 - name: seaweedfs
   repository: https://seaweedfs.github.io/seaweedfs/helm
   version: 4.35.0
-digest: sha256:fd0510d22cbdf0753d398857f9ec6786b6bc06bdc467efed9a18a73cd7301cb1
-generated: "2026-06-24T10:10:58.749584012-04:00"
+digest: sha256:2a970c9d44eb59d65c0fc3daa73ad50ed9bfba51d2f74db4ba9664394a458451
+generated: "2026-06-24T10:37:56.74876436-04:00"

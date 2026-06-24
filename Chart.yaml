@@ -46,8 +46,13 @@ maintainers:
     url: https://github.com/Bugs5382
 
 dependencies:
+  # gitlab subchart 10.1.1 = GitLab v19.1.1 (10.0.x = v19.0.x, 9.11.x was
+  # v18.11.x). Chart 10.x has breaking changes — see the "Targeting the
+  # latest GitLab (19.x)" docs page: Gateway API is on by default (disabled
+  # under global.gatewayApi below), bundled object storage is gone (external
+  # psql/redis + a backup s3cmd Secret are wired below).
   - name: gitlab
-    version: 9.11.6
+    version: 10.1.1
     repository: https://charts.gitlab.io
     condition: gitlab.enabled
 

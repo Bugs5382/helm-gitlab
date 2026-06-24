@@ -10,6 +10,11 @@ official `gitlab/gitlab` chart **10.x** (chart `10.0.x` = GitLab `v19.0.x`,
 10.x carries a few breaking changes that shape how this chart is built. This page
 captures the end-state requirements — not an incremental upgrade procedure.
 
+> ✅ **Status:** the chart now pins the gitlab subchart at `10.1.1` (GitLab
+> `v19.1.1`). Everything below is implemented in `values.yaml` and templates;
+> the one outstanding item is the stable-VCT-labels fix in section 4, which is
+> why the chart's `appVersion` metadata is still frozen at `17.0`.
+
 ## 🚪 Gateway API + envoy-gateway are ON by default — keep them off for Ingress
 
 GitLab 19 flips `global.gatewayApi.{enabled, installEnvoy, configureCertmanager}`

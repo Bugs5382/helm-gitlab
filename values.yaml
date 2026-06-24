@@ -72,6 +72,19 @@ runner:
 # at the top of this file if your cluster uses a non-standard suffix.
 global:
   dnsDomain: cluster.local
+  # GitLab 19 (chart 10.x) turns on Gateway API + the bundled envoy-gateway
+  # subchart by default. The envoy-gateway dependency is gated by
+  # `condition: global.gatewayApi.installEnvoy`, and a dependency CONDITION
+  # resolves globals against THIS top-level `global:` (not `gitlab.global`),
+  # so the disable must live here. Without it, envoy-gateway renders
+  # cluster-scoped ClusterRole/ClusterRoleBinding (controller + certgen).
+  # This chart routes traffic via Traefik Ingress, so Gateway API is off by
+  # default; it is mirrored under `gitlab.global.gatewayApi` for the
+  # render-time certmanager-issuer check. See the gitlab-19 docs page.
+  gatewayApi:
+    enabled: false
+    installEnvoy: false
+    configureCertmanager: false
 
 # toolboxSsh — SSH sidecar in the GitLab toolbox pod so admins can run
 # rake / rails console / backup commands remotely. The chart wires up:
@@ -144,6 +157,13 @@ seaweedfsCacheAuth:
   enabled: true
   secretName: seaweedfs-cache-s3-config
   existingSecret: ""
+
+# s3cmd config Secret for the toolbox backup-utility (rendered by
+# templates/secret-toolbox-backup-s3cmd.yaml). GitLab 19 (chart 10.x) removed
+# bundled object storage and now hard-fails the render unless backup object
+# storage is configured; wired below at gitlab.gitlab.toolbox.backups.
+toolboxBackup:
+  s3cmdSecretName: gitlab-backup-s3cmd
 
 gitssh:
   enabled: true
@@ -258,6 +278,16 @@ gitlab:
   global:
     edition: ee
     storageClass: ""                    # set to storageClass at deploy time
+
+    # Render-time mirror of the top-level global.gatewayApi disable. GitLab 19
+    # (chart 10.x) defaults Gateway API on, which pulls in the certmanager-issuer
+    # subchart whose ConfigMap then fails the render demanding an email.
+    # `configureCertmanager` is read at render time via gitlab.global, so it must
+    # be set here too (installEnvoy is handled by the top-level global condition).
+    gatewayApi:
+      enabled: false
+      installEnvoy: false
+      configureCertmanager: false
 
     hosts:
       domain: ""                        # set to hostnames.gitlab at deploy time
@@ -752,6 +782,27 @@ gitlab:
     # everything references stable Secret + image names hardcoded here to
     # avoid scope-leak between umbrella and subchart contexts.
     toolbox:
+      # GitLab 19 (chart 10.x) requires backup object storage to be wired or
+      # the render hard-fails (checkConfig). Point the backup-utility at the
+      # s3cmd config Secret rendered by templates/secret-toolbox-backup-s3cmd.yaml.
+      # Keep `secret` in sync with toolboxBackup.s3cmdSecretName above; the
+      # backups bucket comes from gitlab.global.appConfig.backups.bucket.
+      backups:
+        objectStorage:
+          config:
+            secret: gitlab-backup-s3cmd
+            key: config
+      # The chart runs a hand-rolled PostgreSQL 18 server, but the stock
+      # gitlab-toolbox-ee ships a <18 client that cannot `pg_dump` it, so
+      # `gitlab-backup` fails. Build images/gitlab-toolbox-pg18/ (a thin derived
+      # image adding the pgdg postgresql-client-18) and point the toolbox at it.
+      # Subchart values can't reference image.registry from the umbrella, so set
+      # the repository explicitly to <your image.registry>/gitlab-toolbox-pg18 and
+      # the tag to the deployed GitLab version. Uncomment + set before taking
+      # backups of the in-cluster PG18 database:
+      # image:
+      #   repository: <your-registry>/gitlab-toolbox-pg18
+      #   tag: v19.1.1
       # SA created by the toolbox subchart itself with the name below; our
       # umbrella's templates/toolbox-ssh.yaml only attaches Role + RoleBinding
       # to it (so the sidecar can `kubectl exec` into the toolbox container).
