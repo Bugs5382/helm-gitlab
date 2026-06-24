@@ -56,19 +56,19 @@ dependencies:
     repository: https://traefik.github.io/charts
     condition: traefik.enabled
 
-  # valkey is a vendored fork at charts/valkey/ with a helper rename
-  # patch (see charts/valkey/VENDOR.md). It is listed here with NO
-  # `repository:` field — helm 3+ resolves repo-less dependencies from
-  # the local `charts/` directory and `helm dependency update` is a
-  # no-op for them (no remote refresh to clobber the patch). Listing
-  # the dep is what `helm lint` needs; the un-repo'd form is what
-  # preserves the vendor.
+  # valkey: upstream chart (un-forked). It was previously vendored at
+  # charts/valkey/ with a one-line patch renaming the global `common.image`
+  # helper, which clashed with SeaweedFS's same-named helper. SeaweedFS fixed
+  # its side upstream (PR #9044 — namespaced all helpers, in seaweedfs chart
+  # 4.31.0+, and our seaweedfs 4.35.0 has it), so nothing else defines
+  # `common.image` and the collision is gone. Fork no longer needed.
   - name: valkey
-    version: 0.9.4
+    version: 0.10.0
+    repository: https://valkey.io/valkey-helm
     condition: valkey.enabled
 
   - name: seaweedfs
-    version: 4.34.0
+    version: 4.35.0
     repository: https://seaweedfs.github.io/seaweedfs/helm
     condition: seaweedfs.enabled
 
@@ -77,7 +77,7 @@ dependencies:
   # resources from colliding with the durable instance. emptyDir-backed
   # (see values.yaml seaweedfsCache block) so cache churn stays off Longhorn.
   - name: seaweedfs
-    version: 4.34.0
+    version: 4.35.0
     repository: https://seaweedfs.github.io/seaweedfs/helm
     alias: seaweedfsCache
     condition: seaweedfsCache.enabled

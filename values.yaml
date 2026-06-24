@@ -1225,8 +1225,13 @@ seaweedfsCache:
       - name: data1
         type: emptyDir
         maxVolumes: 40        # 40 x 1000MB => ~40GB ceiling on node ephemeral disk
-    idx:
-      type: emptyDir
+    # seaweedfs 4.35.0 rejects an emptyDir volume INDEX (idx.type: emptyDir):
+    # an ephemeral index beside persistent data is wiped on every restart,
+    # forcing a full rebuild from the .dat (fatal on older versions). 4.34.0
+    # silently allowed it. Our data dirs are themselves emptyDir (disposable
+    # runner cache), so `idx: {}` keeps the index next to the data — both
+    # ephemeral together, which is exactly right for a throwaway cache.
+    idx: {}
     logs:
       type: emptyDir
     metricsPort: 9327

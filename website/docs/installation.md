@@ -9,12 +9,13 @@ published chart to `helm repo add`.
 
 ## 1️⃣ Add the dependency repos
 
-The umbrella chart depends on the GitLab, Traefik, and SeaweedFS charts (Valkey
-is vendored in `charts/`). Add their repos so Helm can resolve them:
+The umbrella chart depends on the GitLab, Traefik, Valkey, and SeaweedFS charts.
+Add their repos so Helm can resolve them:
 
 ```bash
 helm repo add gitlab    https://charts.gitlab.io
 helm repo add traefik   https://traefik.github.io/charts
+helm repo add valkey    https://valkey.io/valkey-helm
 helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
 helm repo update
 ```

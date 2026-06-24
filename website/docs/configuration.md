@@ -59,7 +59,7 @@ is asynchronous.
 
 | Value | Default | Description |
 |-------|---------|-------------|
-| `valkey.enabled` | `true` | The Redis-compatible store (vendored chart). |
+| `valkey.enabled` | `true` | The Redis-compatible store (upstream chart). |
 | `valkeyAuth.secretName` | `valkey-auth` | Auto-generated auth Secret. |
 
 ## 🚦 Ingress & networking — `traefik`, `gitssh`, `ingressClassName`

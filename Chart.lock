@@ -6,13 +6,13 @@ dependencies:
   repository: https://traefik.github.io/charts
   version: 32.1.1
 - name: valkey
-  repository: ""
-  version: 0.9.4
+  repository: https://valkey.io/valkey-helm
+  version: 0.10.0
 - name: seaweedfs
   repository: https://seaweedfs.github.io/seaweedfs/helm
-  version: 4.34.0
+  version: 4.35.0
 - name: seaweedfs
   repository: https://seaweedfs.github.io/seaweedfs/helm
-  version: 4.34.0
-digest: sha256:d7f3d3b3362736e7fb290d96c60a3ec399d98dc22da2a2ffd64dd631251d4bb0
-generated: "2026-06-19T23:33:46.001569922-04:00"
+  version: 4.35.0
+digest: sha256:fd0510d22cbdf0753d398857f9ec6786b6bc06bdc467efed9a18a73cd7301cb1
+generated: "2026-06-24T10:10:58.749584012-04:00"
