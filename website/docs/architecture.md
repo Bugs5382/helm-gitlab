@@ -40,9 +40,9 @@ StatefulSets directly:
 
 ### ⚡ Valkey
 
-A Redis-compatible store, supplied as a **vendored chart** under `charts/valkey`
-(a fork with a small helper rename patch). Its auth password is auto-generated
-and kept stable across upgrades.
+A Redis-compatible store, pulled from the **upstream Valkey chart**
+(`valkey.io/valkey-helm`). Its auth password is auto-generated and kept stable
+across upgrades.
 
 ### 🪣 SeaweedFS (object storage)
 
@@ -91,8 +91,8 @@ alerts that you can enable where prometheus-operator is present.
 |-------|---------|--------|
 | gitlab | 9.11.6 | `https://charts.gitlab.io` |
 | traefik | 32.1.1 | `https://traefik.github.io/charts` |
-| valkey | 0.9.4 | vendored in `charts/` |
-| seaweedfs | 4.34.0 | `https://seaweedfs.github.io/seaweedfs/helm` |
-| seaweedfs (aliased `seaweedfsCache`) | 4.34.0 | same repo |
+| valkey | 0.10.0 | `https://valkey.io/valkey-helm` |
+| seaweedfs | 4.35.0 | `https://seaweedfs.github.io/seaweedfs/helm` |
+| seaweedfs (aliased `seaweedfsCache`) | 4.35.0 | same repo |
 
 The chart targets Kubernetes **&ge; 1.28** and tracks GitLab app version 17.x.

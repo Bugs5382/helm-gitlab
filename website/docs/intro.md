@@ -11,7 +11,7 @@ up to first-class in-cluster datastores that you operate yourself:
 
 - 🐘 **PostgreSQL 18** — a hand-rolled primary + standby pair with asynchronous
   streaming replication and manual failover.
-- ⚡ **Valkey** — a Redis-compatible store via a vendored chart.
+- ⚡ **Valkey** — a Redis-compatible store via the upstream Valkey chart.
 - 🪣 **SeaweedFS** — S3-compatible object storage (two instances: one durable,
   one disposable for the CI runner cache).
 - 🚦 **Traefik v3** — on an isolated ingress class so it never collides with a

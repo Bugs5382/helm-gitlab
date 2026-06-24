@@ -7,7 +7,7 @@ A self-hosted, **bring-your-own-datastores** GitLab Helm chart (PostgreSQL HA, V
 ## ✨ What's inside
 
 - 🐘 **PostgreSQL 18** — hand-rolled primary + standby with async streaming replication and manual failover.
-- ⚡ **Valkey** — Redis-compatible store (vendored chart).
+- ⚡ **Valkey** — Redis-compatible store (upstream chart).
 - 🪣 **SeaweedFS** — S3-compatible object storage (durable + a disposable runner-cache instance).
 - 🚦 **Traefik v3** — on an isolated ingress class.
 
@@ -18,6 +18,7 @@ GitLab itself is deployed via the official GitLab subchart, configured to consum
 ```bash
 helm repo add gitlab    https://charts.gitlab.io
 helm repo add traefik   https://traefik.github.io/charts
+helm repo add valkey    https://valkey.io/valkey-helm
 helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
 helm repo update
 helm dependency build .
