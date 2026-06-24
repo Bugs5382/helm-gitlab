@@ -89,10 +89,15 @@ alerts that you can enable where prometheus-operator is present.
 
 | Chart | Version | Source |
 |-------|---------|--------|
-| gitlab | 9.11.6 | `https://charts.gitlab.io` |
+| gitlab | 10.1.1 | `https://charts.gitlab.io` |
 | traefik | 32.1.1 | `https://traefik.github.io/charts` |
 | valkey | 0.10.0 | `https://valkey.io/valkey-helm` |
 | seaweedfs | 4.35.0 | `https://seaweedfs.github.io/seaweedfs/helm` |
 | seaweedfs (aliased `seaweedfsCache`) | 4.35.0 | same repo |
 
-The chart targets Kubernetes **&ge; 1.28** and tracks GitLab app version 17.x.
+The chart targets Kubernetes **&ge; 1.28** and deploys **GitLab 19.1.1** (gitlab
+subchart `10.1.1`). See [Targeting the latest GitLab (19.x)](./gitlab-19) for the
+chart 10.x specifics. The chart's own `appVersion` metadata stays at `17.0` for
+now — the hand-rolled PostgreSQL StatefulSets carry version-bearing labels in
+their immutable `volumeClaimTemplates`, so bumping it would block `helm upgrade`
+until those labels are made stable.

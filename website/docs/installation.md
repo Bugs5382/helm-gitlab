@@ -35,6 +35,20 @@ This pulls the pinned dependency versions (per `Chart.lock`) into `charts/`.
 This repo ships source only. Build the images under `images/` and push them to
 your registry, then reference that registry via `image.registry`.
 
+This includes `images/gitlab-toolbox-pg18/` — a GitLab toolbox image with a
+PostgreSQL 18 client. The chart runs a PostgreSQL 18 server, and the stock
+`gitlab-toolbox-ee` ships an older client that cannot `pg_dump` it, so
+`gitlab-backup` fails without this image. Build it for the GitLab version you
+deploy, then set `gitlab.gitlab.toolbox.image.{repository,tag}`:
+
+```bash
+docker build \
+  --build-arg REGISTRY=registry.gitlab.com \
+  --build-arg GITLAB_VERSION=v19.1.1 \
+  -t <your-registry>/gitlab-toolbox-pg18:v19.1.1 \
+  images/gitlab-toolbox-pg18
+```
+
 ## 4️⃣ Provide values
 
 At minimum you must set the [required values](./configuration).

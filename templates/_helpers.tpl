@@ -170,3 +170,27 @@ Credentials + endpoint for the disposable runner-cache SeaweedFS.
 {{- define "helm-gitlab.cacheS3Endpoint" -}}
 {{- printf "http://seaweedfs-cache-s3:8333" -}}
 {{- end -}}
+
+{{/*
+helm-gitlab.backupS3cmdConfig — renders an s3cmd `.s3cfg` for the GitLab
+toolbox backup-utility (consumed via gitlab.gitlab.toolbox.backups.
+objectStorage.config). GitLab 19 (chart 10.x) dropped bundled object storage
+and now hard-fails the render unless this is configured.
+
+Object storage in this chart is the in-cluster SeaweedFS gateway, so the
+config is path-style + http against seaweedfs-s3. Credentials come from the
+same lookup-stable helpers as the rest of the stack (helm-gitlab.s3AccessKey/
+s3SecretKey, backed by the seaweedfsAuth Secret).
+*/}}
+{{- define "helm-gitlab.backupS3cmdConfig" -}}
+{{- $ak := include "helm-gitlab.s3AccessKey" . -}}
+{{- $sk := include "helm-gitlab.s3SecretKey" . -}}
+{{- $port := int .Values.seaweedfs.s3.port -}}
+[default]
+access_key = {{ $ak }}
+secret_key = {{ $sk }}
+host_base = seaweedfs-s3:{{ $port }}
+host_bucket = seaweedfs-s3:{{ $port }}
+use_https = False
+signature_v2 = False
+{{- end -}}

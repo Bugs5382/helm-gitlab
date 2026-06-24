@@ -89,6 +89,18 @@ When disabled, provide TLS Secrets yourself.
 | `toolboxSsh.publicKey` | `""` (required) | Admin SSH public key (key auth only). |
 | `toolboxSsh.username` | `admin` | SSH username. |
 
+## 🎯 GitLab 19 / backups — `global.gatewayApi`, `toolboxBackup`
+
+The chart deploys GitLab 19 (subchart `10.1.1`). Chart 10.x needs a couple of
+knobs handled — see [Targeting the latest GitLab (19.x)](./gitlab-19) for the why.
+
+| Value | Default | Description |
+|-------|---------|-------------|
+| `global.gatewayApi.*` | all `false` | Gateway API is off (this chart uses Traefik Ingress); mirrored under `gitlab.global.gatewayApi`. Do not enable both. |
+| `toolboxBackup.s3cmdSecretName` | `gitlab-backup-s3cmd` | Name of the generated s3cmd Secret the toolbox backup-utility uses (GitLab 19 requires backup object storage). |
+| `gitlab.gitlab.toolbox.backups.objectStorage.config.secret` | `gitlab-backup-s3cmd` | Wires the toolbox to that Secret. Keep in sync with the name above. |
+| `gitlab.gitlab.toolbox.image.{repository,tag}` | _(commented)_ | Set to your PG18-capable toolbox image (see [Installation](./installation) step 3) before backing up the in-cluster PostgreSQL 18 database. |
+
 ## 📈 Monitoring — `seaweedfsAlerts` and subchart ServiceMonitors
 
 ServiceMonitor / PrometheusRule emission is **per-environment** so the chart
