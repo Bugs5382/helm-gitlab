@@ -48,3 +48,4 @@ you better.
 - [Prerequisites](./prerequisites) — what your cluster needs first.
 - [Installation](./installation) — repo setup, dependencies, and `helm install`.
 - [Configuration](./configuration) — required values and the main tunables.
+- [The story](./story) — how this chart was born from a real cross-cloud GitLab migration.
