@@ -13,7 +13,7 @@ tasks. Bundles together everything that lives outside the toolbox subchart:
 The sidecar container itself is injected into the toolbox pod via
 `gitlab.gitlab.toolbox.extraContainers` (in values.yaml).
 
-@todo(sfroebel, helm/gitlab): add a per-IP allowlist Traefik middleware on this
+@todo: add a per-IP allowlist Traefik middleware on this
 IngressRouteTCP before broader rollout.
 */ -}}
 {{- if .Values.toolboxSsh.enabled -}}

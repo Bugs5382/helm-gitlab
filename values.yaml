@@ -99,7 +99,7 @@ global:
 #     toolbox container.
 # Auth: SSH public key only (no password). Provide the admin pubkey via
 # local-values.yaml; otherwise no one can connect.
-# @todo(sfroebel, helm/gitlab): add per-IP allowlist middleware on the
+# @todo: add per-IP allowlist middleware on the
 # IngressRouteTCP before broader rollout.
 toolboxSsh:
   enabled: true
@@ -108,7 +108,7 @@ toolboxSsh:
   serviceName: gitlab-toolbox-ssh
   serviceAccountName: gitlab-toolbox-ssh
   secretName: gitlab-toolbox-ssh-key
-  # @todo(sfroebel, helm/gitlab): pin to a concrete linuxserver/openssh-server
+  # @todo: pin to a concrete linuxserver/openssh-server
   # tag once we verify a stable one — the project's tags use a non-obvious
   # format (e.g. `version-9.9_p1-r2-ls181`) and the bare `9.9_p1-r2-ls181`
   # tag I tried first didn't exist.
