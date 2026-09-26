@@ -22,11 +22,11 @@ permissions:
   pull-requests: read
 jobs:
   update-draft-release:
-    name: Update Draft Release
+    name: 📝 Update Draft Release
     runs-on: ubuntu-latest
     steps:
-      - uses: release-drafter/release-drafter@v6
+      - name: Draft release notes
+        uses: release-drafter/release-drafter@v7
         with:
           config-name: release-drafter.yml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
