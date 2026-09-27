@@ -65,6 +65,7 @@ There is no unit-test suite; correctness is lint + a full template render. Run d
 
 - See `CLAUDE.md` for the branch/commit/PR rules; they are enforced by the git hooks in
   `.claude/hooks` (run `bash .claude/hooks/install.sh` once per clone).
+- Open every PR as a draft. CI skips drafts, so run the full checks locally, push once they pass, and mark the PR ready when the work is finished; see CLAUDE.md "CI and Actions minutes".
 - **Issue-first.** Every PR body must reference an issue (`Closes #N`) — CI fails otherwise. PR/issue
   titles are Conventional Commits; the autolabeler derives the category label from the title.
 - **No AI tells or emoji** in commits, PR/issue titles+bodies, comments, or source. Emoji are welcome

@@ -34,6 +34,36 @@ package).
 
 Keep public artifacts (issues, PRs, commit messages) free of references to local-only design notes.
 
+## CI and Actions minutes
+
+GitHub bills every job for at least one full minute, and a private org's included minutes run out
+fast during a wave of PRs. The shipped workflows are shaped around that:
+
+- **Drafts run nothing.** PR workflows skip draft PRs and run on `ready_for_review`, `opened`,
+  `synchronize` and `reopened`. Open a PR as a draft, run the full checks locally, push once they
+  pass, and mark it ready when the work is finished. That starts one CI run. After it is ready,
+  push only real fixes, batched into one push.
+- **One job for the small checks.** PR Title, PR Body, PR Hygiene and the gitleaks secret scan are
+  steps of one `✅ PR Checks` job (`job-pr-checks.yaml`). Every step runs even when an earlier one
+  fails, so the log shows every failure. This job and the label checker are the only workflows
+  that react to `edited`: a title or body fix reruns them, not the other checks.
+- **Pull requests only.** Actionlint and GoLic run on pull requests, not on push to `main`. The
+  squash merge lands the tree the PR run already tested. Only Release Drafter runs on `main`, and
+  Docs Publish runs on `v*` release tags.
+- **Keep the PR run honest:** the PR run covers the merged code only when the branch is up to date
+  with `main` before it merges. In the branch ruleset, add **Require status checks to pass** with
+  the repo's check names and turn on **Require branches to be up to date before merging** (API:
+  the `required_status_checks` rule with `strict_required_status_checks_policy: true`; classic
+  branch protection: `required_status_checks.strict: true`). The setting only exists alongside
+  required checks. Use GitHub's "Update branch" when a PR falls behind.
+- **No no-op jobs.** The chart has no root `go.mod` or `package.json` (the docs site's
+  `website/package.json` is not a shipped dependency), so there is no dependency licence workflow.
+  GoLic stays: it checks the Apache-2.0 header on the YAML, shell and TypeScript sources.
+- **Every job has a `timeout-minutes`** (10 for small checks, 15 for the docs build), so a hung job
+  stops long before GitHub's 360-minute default.
+- **Required checks:** if the ruleset lists required checks, use the job names: `✅ PR Checks`
+  replaces `PR Title`, `PR Body`, `PR Hygiene` and `Gitleaks (secret scan)`.
+
 ## Releasing
 
 On every merge to `main`, **release-drafter** drafts the next GitHub Release notes by label.
