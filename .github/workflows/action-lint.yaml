@@ -13,24 +13,30 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-name: "Actionlint"
+name: Actionlint
 # Validate the GitHub Actions workflow files. The other PR checks don't verify
 # that a workflow is actually runnable, so a malformed one (e.g. an invalid job
 # id) can merge green and only fail at startup on main. actionlint catches that
 # class at PR time. shellcheck integration is disabled (-shellcheck=) to keep
 # the gate focused on workflow validity; drop that flag to also lint run: shell.
+#
+# Pull requests only, and not while the PR is a draft; the PR run covers what
+# merges, so nothing reruns on push to main.
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
-    paths: [".github/workflows/**"]
+    types: [opened, synchronize, reopened, ready_for_review]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   actionlint:
     name: 🧹 Actionlint
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
